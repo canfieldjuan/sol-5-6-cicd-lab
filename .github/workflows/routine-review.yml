@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Resolve exact PR head
         id: pr
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const number = Number('${{ inputs.pr_number }}');
@@ -116,7 +116,7 @@ jobs:
           name: bounded-review-${{ inputs.pr_number }}-${{ needs.review.outputs.head_sha }}
 
       - name: Verify head and replace the bounded review comment
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           REVIEWED_HEAD: ${{ needs.review.outputs.head_sha }}
