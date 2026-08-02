@@ -1,0 +1,13 @@
+node_modules/
+.codex-log/
+artifacts/
+*.local.json
+*.jsonl
+.codex-*-context.json
+codex-review.json
+review-comment.md
+codex-implementation.*
+/codex-output.*
+/review-output.*
+/implementation-output.*
+coverage/

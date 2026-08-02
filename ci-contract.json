@@ -1,0 +1,63 @@
+{
+  "$schema": "./schemas/ci-contract.schema.json",
+  "schemaVersion": 1,
+  "repository": {
+    "defaultBranch": "main",
+    "productionBranch": null,
+    "minimumNodeVersion": 20
+  },
+  "reviewPolicy": {
+    "routineMode": "bounded",
+    "blockingSeverities": ["P0", "P1"],
+    "maxBlockers": 5,
+    "singleComment": true,
+    "automaticReview": false,
+    "deepAuditArtifactOnly": true
+  },
+  "checks": [
+    {
+      "id": "contract",
+      "title": "Validate repository contract",
+      "required": true,
+      "command": ["node", "scripts/validate-contract.mjs"]
+    },
+    {
+      "id": "scenarios",
+      "title": "Validate scenario manifests",
+      "required": true,
+      "command": ["node", "scripts/validate-scenarios.mjs"]
+    },
+    {
+      "id": "prompts",
+      "title": "Validate prompt boundaries",
+      "required": true,
+      "command": ["node", "scripts/check-prompts.mjs"]
+    },
+    {
+      "id": "tests",
+      "title": "Run unit tests",
+      "required": true,
+      "command": ["node", "--test"]
+    },
+    {
+      "id": "sensitive-assets",
+      "title": "Scan deployable paths for sensitive artifacts",
+      "required": true,
+      "command": ["node", "scripts/check-sensitive-files.mjs"]
+    },
+    {
+      "id": "workflow-review",
+      "title": "Review workflow policy manually",
+      "required": false,
+      "command": ["node", "scripts/check-workflows.mjs"]
+    }
+  ],
+  "sensitiveFiles": {
+    "deployableRoots": ["public", "dist", "static"],
+    "denyNamePatterns": [
+      "(?:employee|customer|payroll|timesheet|invoice).*(?:png|jpe?g|pdf|csv)$",
+      "(?:secret|credential|token|api[-_]?key)"
+    ],
+    "allowPaths": []
+  }
+}

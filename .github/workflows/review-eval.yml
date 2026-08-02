@@ -1,0 +1,67 @@
+name: Codex review scenario
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Review scenario
+        required: true
+        default: unknown-data-as-zero
+        type: choice
+        options:
+          - unknown-data-as-zero
+          - explicit-zero-safe
+          - duplicate-root-cause
+          - p2-only-noise
+          - public-sensitive-asset
+      effort:
+        description: Reasoning effort
+        required: true
+        default: high
+        type: choice
+        options: [high, xhigh, max]
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Write trusted scenario context
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        working-directory: scenarios/review/${{ inputs.scenario }}
+        run: |
+          rm -f .codex-eval-context.json
+          node -e 'require("node:fs").writeFileSync(".codex-eval-context.json", JSON.stringify({scenarioDirectory: ".", headSha: process.env.HEAD_SHA}, null, 2))'
+
+      - name: Run read-only scenario review
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ github.workspace }}/.github/codex/prompts/review-eval.md
+          output-file: ${{ runner.temp }}/codex-review.json
+          output-schema-file: ${{ github.workspace }}/schemas/review-output.schema.json
+          working-directory: ${{ github.workspace }}/scenarios/review/${{ inputs.scenario }}
+          model: gpt-5.6-sol
+          effort: ${{ inputs.effort }}
+          permission-profile: ":read-only"
+          safety-strategy: drop-sudo
+          codex-args: '["--ephemeral"]'
+
+      - name: Grade scenario
+        run: node scripts/grade-review.mjs "scenarios/review/${{ inputs.scenario }}" "$RUNNER_TEMP/codex-review.json" --expected-sha "${{ github.sha }}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: review-eval-${{ inputs.scenario }}-${{ inputs.effort }}
+          path: ${{ runner.temp }}/codex-review.json
+          if-no-files-found: warn
+          retention-days: 14

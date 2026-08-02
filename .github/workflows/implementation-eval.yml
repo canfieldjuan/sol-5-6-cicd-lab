@@ -1,0 +1,70 @@
+name: Codex implementation scenario
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Implementation scenario
+        required: true
+        default: stable-idempotency-retry
+        type: choice
+        options:
+          - stable-idempotency-retry
+          - stale-session-response
+      effort:
+        description: Reasoning effort
+        required: true
+        default: high
+        type: choice
+        options: [high, xhigh, max]
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Write trusted scenario context
+        env:
+          TASK_FILE: ${{ github.workspace }}/scenarios/implementation/${{ inputs.scenario }}/task.md
+        working-directory: scenarios/implementation/${{ inputs.scenario }}/workspace
+        run: |
+          rm -f .codex-eval-context.json
+          node -e 'require("node:fs").writeFileSync(".codex-eval-context.json", JSON.stringify({taskFile: process.env.TASK_FILE}, null, 2))'
+
+      - name: Run scoped implementation
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ github.workspace }}/.github/codex/prompts/implementation-eval.md
+          output-file: ${{ runner.temp }}/codex-implementation.md
+          working-directory: ${{ github.workspace }}/scenarios/implementation/${{ inputs.scenario }}/workspace
+          model: gpt-5.6-sol
+          effort: ${{ inputs.effort }}
+          permission-profile: ":workspace"
+          safety-strategy: drop-sudo
+          codex-args: '["--ephemeral"]'
+
+      - name: Grade tests and changed scope
+        run: node scripts/grade-implementation.mjs "scenarios/implementation/${{ inputs.scenario }}"
+
+      - name: Capture patch
+        if: always()
+        run: git diff --binary HEAD > codex-implementation.patch
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: implementation-eval-${{ inputs.scenario }}-${{ inputs.effort }}
+          path: |
+            ${{ runner.temp }}/codex-implementation.md
+            codex-implementation.patch
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/sol-5-6-cicd-lab/review-output.schema.json",
+  "title": "Bounded routine review output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "reviewedHeadSha", "summary", "blockers", "advisory", "verification"],
+  "properties": {
+    "status": { "enum": ["pass", "block"] },
+    "reviewedHeadSha": { "type": "string", "pattern": "^[a-f0-9]{7,64}$" },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "blockers": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ruleId", "severity", "title", "path", "line", "trigger", "impact", "evidence", "remediation"],
+        "properties": {
+          "ruleId": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "severity": { "enum": ["P0", "P1"] },
+          "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "line": { "type": "integer", "minimum": 1 },
+          "trigger": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "impact": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "evidence": { "type": "string", "minLength": 1, "maxLength": 800 },
+          "remediation": { "type": "string", "minLength": 1, "maxLength": 500 }
+        }
+      }
+    },
+    "advisory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "themes"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "themes": {
+          "type": "array",
+          "maxItems": 3,
+          "items": { "type": "string", "minLength": 1, "maxLength": 120 }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commandsRun", "limitations"],
+      "properties": {
+        "commandsRun": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } },
+        "limitations": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 500 } }
+      }
+    }
+  }
+}

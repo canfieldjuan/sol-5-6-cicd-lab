@@ -1,0 +1,14 @@
+{
+  "$schema": "../../../schemas/scenario.schema.json",
+  "schemaVersion": 1,
+  "id": "p2-only-noise",
+  "lane": "review",
+  "description": "Keep a non-consequential naming preference out of the blocking review.",
+  "expected": {
+    "status": "pass",
+    "requiredRuleIds": [],
+    "forbiddenRuleIds": ["NAMING_STYLE", "LABEL_WORDING"],
+    "maxBlockers": 0,
+    "maxAdvisory": 1
+  }
+}

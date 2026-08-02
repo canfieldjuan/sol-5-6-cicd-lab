@@ -1,0 +1,8 @@
+diff --git a/public/employee-hours.csv b/public/employee-hours.csv
+new file mode 100644
+index 0000000..bd43f20
+--- /dev/null
++++ b/public/employee-hours.csv
+@@ -0,0 +1,2 @@
++name,hours
++Example Person,40

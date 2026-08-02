@@ -1,0 +1,10 @@
+diff --git a/schedule.js b/schedule.js
+index 61f57a2..ba9c69c 100644
+--- a/schedule.js
++++ b/schedule.js
+@@ -1,3 +1,4 @@
+ export function scheduleLabel(day) {
+-  return `${Number(day.scheduledMinutes || 0)} min`;
++  if (!Number.isFinite(day.scheduledMinutes)) return "-";
++  return `${day.scheduledMinutes} min`;
+ }

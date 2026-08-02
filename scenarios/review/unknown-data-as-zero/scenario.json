@@ -1,0 +1,14 @@
+{
+  "$schema": "../../../schemas/scenario.schema.json",
+  "schemaVersion": 1,
+  "id": "unknown-data-as-zero",
+  "lane": "review",
+  "description": "Detect a production-impacting fallback that turns unavailable schedule data into a real zero.",
+  "expected": {
+    "status": "block",
+    "requiredRuleIds": ["DATA_UNKNOWN_AS_ZERO"],
+    "forbiddenRuleIds": [],
+    "maxBlockers": 1,
+    "maxAdvisory": 0
+  }
+}

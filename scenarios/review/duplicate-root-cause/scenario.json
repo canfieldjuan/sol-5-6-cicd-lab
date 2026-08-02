@@ -1,0 +1,14 @@
+{
+  "$schema": "../../../schemas/scenario.schema.json",
+  "schemaVersion": 1,
+  "id": "duplicate-root-cause",
+  "lane": "review",
+  "description": "Group two visible manifestations of one bad fallback into one blocker.",
+  "expected": {
+    "status": "block",
+    "requiredRuleIds": ["DATA_UNKNOWN_AS_ZERO"],
+    "forbiddenRuleIds": [],
+    "maxBlockers": 1,
+    "maxAdvisory": 0
+  }
+}

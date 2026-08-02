@@ -1,0 +1,13 @@
+{
+  "$schema": "../../../schemas/scenario.schema.json",
+  "schemaVersion": 1,
+  "id": "stable-idempotency-retry",
+  "lane": "implementation",
+  "description": "Fix a retry path without changing the submission's idempotency intent.",
+  "expected": {
+    "commands": [["node", "--test", "behavior.specimen.mjs"]],
+    "allowedPaths": ["payment.mjs"],
+    "forbiddenPaths": ["behavior.specimen.mjs", "package.json"],
+    "maxChangedFiles": 1
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "../../../schemas/scenario.schema.json",
+  "schemaVersion": 1,
+  "id": "stale-session-response",
+  "lane": "implementation",
+  "description": "Prevent a response from an ended session from restoring privileged data.",
+  "expected": {
+    "commands": [["node", "--test", "behavior.specimen.mjs"]],
+    "allowedPaths": ["controller.mjs"],
+    "forbiddenPaths": ["behavior.specimen.mjs", "package.json"],
+    "maxChangedFiles": 1
+  }
+}

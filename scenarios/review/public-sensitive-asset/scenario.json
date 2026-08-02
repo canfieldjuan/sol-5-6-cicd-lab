@@ -1,0 +1,14 @@
+{
+  "$schema": "../../../schemas/scenario.schema.json",
+  "schemaVersion": 1,
+  "id": "public-sensitive-asset",
+  "lane": "review",
+  "description": "Block an employee export added beneath a publicly deployed directory.",
+  "expected": {
+    "status": "block",
+    "requiredRuleIds": ["PUBLIC_SENSITIVE_ASSET"],
+    "forbiddenRuleIds": [],
+    "maxBlockers": 1,
+    "maxAdvisory": 0
+  }
+}

@@ -1,0 +1,88 @@
+name: Explicit Codex deep audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+      effort:
+        description: Reasoning effort
+        required: true
+        default: xhigh
+        type: choice
+        options: [xhigh, max]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Resolve exact PR head
+        id: pr
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const number = Number('${{ inputs.pr_number }}');
+            if (!Number.isSafeInteger(number) || number < 1) {
+              core.setFailed('pr_number must be a positive integer');
+              return;
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: number,
+            });
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('base_sha', pr.base.sha);
+
+      - name: Check out trusted audit policy
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: control
+          persist-credentials: false
+
+      - name: Check out untrusted PR head
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ steps.pr.outputs.head_sha }}
+          fetch-depth: 0
+          path: target
+          persist-credentials: false
+
+      - name: Write trusted audit context
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          AUDIT_PROTOCOL: ${{ github.workspace }}/control/docs/DEEP_AUDIT_PROTOCOL.md
+        working-directory: target
+        run: |
+          rm -f .codex-review-context.json
+          node -e 'require("node:fs").writeFileSync(".codex-review-context.json", JSON.stringify({prNumber: Number(process.env.PR_NUMBER), baseSha: process.env.BASE_SHA, headSha: process.env.HEAD_SHA, auditProtocol: process.env.AUDIT_PROTOCOL}, null, 2))'
+
+      - name: Run read-only deep audit
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: ${{ github.workspace }}/control/.github/codex/prompts/deep-audit.md
+          output-file: ${{ runner.temp }}/deep-audit.md
+          working-directory: ${{ github.workspace }}/target
+          model: gpt-5.6-sol
+          effort: ${{ inputs.effort }}
+          permission-profile: ":read-only"
+          safety-strategy: drop-sudo
+          codex-args: '["--ephemeral"]'
+
+      - name: Upload audit artifact without posting PR comments
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deep-audit-${{ inputs.pr_number }}-${{ steps.pr.outputs.head_sha }}
+          path: ${{ runner.temp }}/deep-audit.md
+          if-no-files-found: error
+          retention-days: 14

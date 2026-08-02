@@ -1,0 +1,14 @@
+{
+  "$schema": "../../../schemas/scenario.schema.json",
+  "schemaVersion": 1,
+  "id": "explicit-zero-safe",
+  "lane": "review",
+  "description": "Do not flag a patch that preserves the distinction between unknown and an explicit zero.",
+  "expected": {
+    "status": "pass",
+    "requiredRuleIds": [],
+    "forbiddenRuleIds": ["DATA_UNKNOWN_AS_ZERO"],
+    "maxBlockers": 0,
+    "maxAdvisory": 0
+  }
+}

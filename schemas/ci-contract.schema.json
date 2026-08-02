@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/sol-5-6-cicd-lab/ci-contract.schema.json",
+  "title": "Portable CI contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "repository", "reviewPolicy", "checks", "sensitiveFiles"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defaultBranch", "productionBranch", "minimumNodeVersion"],
+      "properties": {
+        "defaultBranch": { "type": "string", "minLength": 1 },
+        "productionBranch": { "type": ["string", "null"] },
+        "minimumNodeVersion": { "type": "integer", "minimum": 20 }
+      }
+    },
+    "reviewPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routineMode", "blockingSeverities", "maxBlockers", "singleComment", "automaticReview", "deepAuditArtifactOnly"],
+      "properties": {
+        "routineMode": { "const": "bounded" },
+        "blockingSeverities": {
+          "type": "array",
+          "const": ["P0", "P1"]
+        },
+        "maxBlockers": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "singleComment": { "const": true },
+        "automaticReview": { "const": false },
+        "deepAuditArtifactOnly": { "const": true }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "required", "command"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "title": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" },
+          "command": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "sensitiveFiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deployableRoots", "denyNamePatterns", "allowPaths"],
+      "properties": {
+        "deployableRoots": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "denyNamePatterns": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "allowPaths": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    }
+  }
+}
