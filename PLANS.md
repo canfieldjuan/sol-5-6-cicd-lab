@@ -9,7 +9,8 @@ model control.
 ## Constraints
 
 - Routine review must not become an unlimited PR comment queue.
-- The OpenAI API key and repository/PR write permissions must never share a job.
+- ChatGPT-managed Codex auth and repository/PR write permissions must never share
+  a job.
 - PR-controlled files must not replace trusted review prompts, schemas, graders,
   or renderers.
 - Local tools must run with Node.js 20 and no runtime dependencies.
@@ -54,12 +55,19 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - 2026-08-02: Published the private repository and observed `CI / contract` pass
   on the current action majors. GitHub rejected private-repository branch protection
   with HTTP 403 because the account requires GitHub Pro for that feature.
+- 2026-08-02: Corrected the agent runtime from API-key GitHub Actions to
+  ChatGPT-managed Pro authentication. Structured jobs now use a dedicated,
+  persistent, serialized `codex-pro` runner; hosted CI remains credential-free.
+- 2026-08-02: Ran live local Pro evaluations at Sol/high. The current lean review
+  fixture caught `DATA_UNKNOWN_AS_ZERO` in 22,729 tokens, the adjacent safe fix
+  passed in 23,708, and the idempotency implementation passed in 10,870 with one
+  changed file.
 
 ## Discoveries
 
-- The current Codex action supports `permission-profile` and
-  `output-schema-file`; exact action SHAs avoid stale action metadata and mutable
-  tag risk.
+- ChatGPT Pro authenticates local Codex and native GitHub review, but GitHub-hosted
+  runners do not inherit that session. Durable account-authenticated CI requires a
+  trusted persistent runner or a secure read/write auth store.
 - A single PR checkout would let a candidate replace its validator. Routine review
   therefore keeps trusted default-branch controls under `control/` and the exact PR
   head under `target/`.

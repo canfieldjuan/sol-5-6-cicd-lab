@@ -21,9 +21,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: codex-pro-account
+  cancel-in-progress: false
+
 jobs:
   evaluate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, codex-pro]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -39,18 +43,24 @@ jobs:
           rm -f .codex-eval-context.json
           node -e 'require("node:fs").writeFileSync(".codex-eval-context.json", JSON.stringify({taskFile: process.env.TASK_FILE}, null, 2))'
 
+      - name: Verify ChatGPT-managed Codex auth
+        run: codex login status 2>&1 | grep -F "Logged in using ChatGPT"
+
       - name: Run scoped implementation
-        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: ${{ github.workspace }}/.github/codex/prompts/implementation-eval.md
-          output-file: ${{ runner.temp }}/codex-implementation.md
-          working-directory: ${{ github.workspace }}/scenarios/implementation/${{ inputs.scenario }}/workspace
-          model: gpt-5.6-sol
-          effort: ${{ inputs.effort }}
-          permission-profile: ":workspace"
-          safety-strategy: drop-sudo
-          codex-args: '["--ephemeral"]'
+        env:
+          EFFORT: ${{ inputs.effort }}
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          codex exec \
+            --skip-git-repo-check \
+            --cd "$GITHUB_WORKSPACE/scenarios/implementation/$SCENARIO/workspace" \
+            --output-last-message "$RUNNER_TEMP/codex-implementation.md" \
+            --model gpt-5.6-sol \
+            --config "model_reasoning_effort=\"$EFFORT\"" \
+            --sandbox workspace-write \
+            --ignore-user-config \
+            --ephemeral \
+            - < "$GITHUB_WORKSPACE/.github/codex/prompts/implementation-eval.md"
 
       - name: Grade tests and changed scope
         run: node scripts/grade-implementation.mjs "scenarios/implementation/${{ inputs.scenario }}"

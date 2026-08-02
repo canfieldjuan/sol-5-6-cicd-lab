@@ -14,6 +14,13 @@
     "automaticReview": false,
     "deepAuditArtifactOnly": true
   },
+  "agentRuntime": {
+    "authMode": "chatgpt-managed",
+    "runnerLabels": ["self-hosted", "linux", "codex-pro"],
+    "model": "gpt-5.6-sol",
+    "defaultEffort": "high",
+    "serializeAccountJobs": true
+  },
   "checks": [
     {
       "id": "contract",
@@ -56,7 +63,7 @@
     "deployableRoots": ["public", "dist", "static"],
     "denyNamePatterns": [
       "(?:employee|customer|payroll|timesheet|invoice).*(?:png|jpe?g|pdf|csv)$",
-      "(?:secret|credential|token|api[-_]?key)"
+      "(?:auth\\.json$|secret|credential|token|api[-_]?key)"
     ],
     "allowPaths": []
   }

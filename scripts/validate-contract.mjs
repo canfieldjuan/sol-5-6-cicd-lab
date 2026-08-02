@@ -4,7 +4,7 @@ import { assertExactKeys, fail, isMain, readJson, rootDir } from "./lib.mjs";
 export function validateContract(contract) {
   const errors = [];
   assertExactKeys(contract,
-    ["schemaVersion", "repository", "reviewPolicy", "checks", "sensitiveFiles"],
+    ["schemaVersion", "repository", "reviewPolicy", "agentRuntime", "checks", "sensitiveFiles"],
     ["$schema"], "contract", errors);
   if (contract.schemaVersion !== 1) errors.push("contract.schemaVersion must be 1");
 
@@ -35,6 +35,16 @@ export function validateContract(contract) {
   if (policy.singleComment !== true) errors.push("reviewPolicy.singleComment must stay enabled");
   if (policy.automaticReview !== false) errors.push("reviewPolicy.automaticReview must stay disabled");
   if (policy.deepAuditArtifactOnly !== true) errors.push("reviewPolicy.deepAuditArtifactOnly must stay enabled");
+
+  const runtime = contract.agentRuntime ?? {};
+  assertExactKeys(runtime, ["authMode", "runnerLabels", "model", "defaultEffort", "serializeAccountJobs"], [], "agentRuntime", errors);
+  if (runtime.authMode !== "chatgpt-managed") errors.push("agentRuntime.authMode must be chatgpt-managed");
+  if (JSON.stringify(runtime.runnerLabels) !== JSON.stringify(["self-hosted", "linux", "codex-pro"])) {
+    errors.push("agentRuntime.runnerLabels must select the dedicated codex-pro runner");
+  }
+  if (runtime.model !== "gpt-5.6-sol") errors.push("agentRuntime.model must be gpt-5.6-sol");
+  if (!["medium", "high", "xhigh", "max"].includes(runtime.defaultEffort)) errors.push("agentRuntime.defaultEffort is invalid");
+  if (runtime.serializeAccountJobs !== true) errors.push("agentRuntime.serializeAccountJobs must stay enabled");
 
   if (!Array.isArray(contract.checks) || contract.checks.length === 0) {
     errors.push("checks must be a non-empty array");

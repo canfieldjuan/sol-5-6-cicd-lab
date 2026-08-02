@@ -32,9 +32,10 @@ implementation and review.
 
 ### Credential separation
 
-- A job that exposes `OPENAI_API_KEY` must not also hold repository write
-  permissions. Safe path: generate a read-only artifact, then use a separate job
-  without the OpenAI key to post or apply it.
+- A job that uses ChatGPT-managed Codex auth must not also hold repository or PR
+  write permissions. Safe path: run it on the dedicated private `codex-pro` runner,
+  generate an artifact, then use a separate hosted job without account auth to post
+  or apply it.
 
 ### Deterministic ownership
 

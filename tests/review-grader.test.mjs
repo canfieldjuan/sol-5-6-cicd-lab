@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { gradeReview } from "../scripts/grade-review.mjs";
+import { gradeReview, normalizeFixtureFindingPath } from "../scripts/grade-review.mjs";
 
 const scenario = {
   expected: {
@@ -40,4 +40,9 @@ test("rejects duplicate manifestations of one root cause", () => {
 
 test("rejects a missed blocking contract", () => {
   assert.match(gradeReview(scenario, result([])).join("\n"), /Expected status block|Missing required rule/);
+});
+
+test("normalizes an explicit fixture head prefix", () => {
+  assert.equal(normalizeFixtureFindingPath("head/schedule.js"), "schedule.js");
+  assert.equal(normalizeFixtureFindingPath("schedule.js"), "schedule.js");
 });

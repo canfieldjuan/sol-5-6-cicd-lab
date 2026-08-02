@@ -21,11 +21,11 @@ keeping a deliberate path for comprehensive investigation.
 - P2 observations are advisory and grouped, not emitted as an inline comment stack.
 - Deep audits are explicit, read-only, and artifact-first.
 - Model and reasoning changes are evaluated against the same scenarios.
-- AI output never receives write credentials in the same job that holds the OpenAI
-  API key.
+- Account-authenticated Codex jobs never receive repository or PR write credentials.
 
 These choices follow current OpenAI guidance for [GPT-5.6 prompting](https://developers.openai.com/api/docs/guides/latest-model),
-[Codex GitHub Actions](https://learn.chatgpt.com/docs/github-action),
+[Codex GitHub review](https://learn.chatgpt.com/docs/third-party/github),
+[ChatGPT-managed CI auth](https://learn.chatgpt.com/docs/auth/ci-cd-auth),
 [custom review rules](https://developers.openai.com/blog/custom-code-review-rules-for-codex),
 and [long-running work](https://learn.chatgpt.com/docs/long-running-work).
 
@@ -54,6 +54,15 @@ npm run ci
 npm run ci:advisory
 ```
 
+Run one scenario immediately with the local ChatGPT-authenticated Codex CLI:
+
+```bash
+npm run eval:review -- unknown-data-as-zero high
+npm run eval:implementation -- stable-idempotency-retry high
+```
+
+Evaluation outputs are written beneath `artifacts/evals/` and are not committed.
+
 ## Repository layout
 
 | Path | Purpose |
@@ -69,19 +78,22 @@ npm run ci:advisory
 
 ## GitHub setup
 
-1. Add `OPENAI_API_KEY` as a repository Actions secret.
-2. Require the deterministic `CI / contract` job in branch protection when the
+1. Connect the repository to Codex cloud for native `@codex review` requests.
+2. For structured workflows, register a dedicated private runner with the
+   `codex-pro` label and sign its Codex CLI in with ChatGPT.
+3. Require the deterministic `CI / contract` job in branch protection when the
    repository visibility and GitHub plan support protected private branches.
-3. Leave routine Codex review manual until the scenario suite meets its targets.
-4. Run `Bounded Codex review` only on a stable PR head.
-5. Use `Codex review scenario` and `Codex implementation scenario` to compare model or
+4. Leave routine Codex review manual until the scenario suite meets its targets.
+5. Run `Bounded Codex review` only on a stable PR head.
+6. Use `Codex review scenario` and `Codex implementation scenario` to compare model or
    reasoning configurations.
 
-The workflows default to the `sol` model alias with `high` reasoning. Higher effort is an
+The workflows default to `gpt-5.6-sol` with `high` reasoning. Higher effort is an
 evaluation variable, not a global quality switch.
 
 ## Status
 
-This is the first executable scaffold. The initial scenarios prove the harness
-shape; the next data milestone is importing reviewed historical PR heads as
-versioned fixtures.
+The executable scaffold has passed hosted deterministic CI and live local
+ChatGPT Pro evaluations for blocking-defect recall, safe-change restraint, and a
+scoped implementation fix. The next data milestone is importing reviewed
+historical PR heads as versioned fixtures.

@@ -33,7 +33,9 @@ async function main() {
   if (!scenarioDirectory) return fail("Usage: node scripts/grade-implementation.mjs <scenario-directory>");
   const directory = path.resolve(scenarioDirectory);
   const workspace = path.join(directory, "workspace");
-  const scenario = await readJson(path.join(directory, "scenario.json"));
+  const manifestIndex = process.argv.indexOf("--manifest");
+  const manifest = manifestIndex >= 0 ? path.resolve(process.argv[manifestIndex + 1]) : path.join(directory, "scenario.json");
+  const scenario = await readJson(manifest);
   const errors = [];
   for (const command of scenario.expected.commands) {
     console.log(`$ ${displayCommand(command)}`);

@@ -46,8 +46,12 @@ an artifact rather than posted as a growing inline-comment queue.
 ### Publisher
 
 A separate job may post a comment or apply an approved patch. It never receives the
-OpenAI API key. This follows the security split in the official Codex GitHub Action
-guidance.
+ChatGPT-managed Codex auth cache. The account-authenticated job has read-only GitHub
+permissions and hands an artifact to a separate hosted publisher job.
+
+Structured agent jobs run on a dedicated persistent `codex-pro` runner and are
+serialized across workflows. Deterministic CI and publisher jobs remain on hosted
+runners without account credentials.
 
 The routine-review and deep-audit jobs use two checkouts: trusted prompts, schemas,
 validators, and renderers come from the default branch under `control/`; the PR head

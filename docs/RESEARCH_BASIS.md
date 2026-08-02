@@ -8,12 +8,14 @@ Snapshot date: 2026-08-02.
   recommends lean, direct prompts and reports internal prompt simplification tests
   with 10-15% quality gains, 41-66% fewer tokens, and 33-67% lower cost. Repeating
   rules through a long session can amplify rather than strengthen them.
-- [Codex GitHub Action guidance](https://learn.chatgpt.com/docs/github-action)
-  recommends narrow permissions, `drop-sudo`, structured output, and separating
-  API-key jobs from jobs that can write to a repository or PR.
-- The live [Codex action contract](https://github.com/openai/codex-action/blob/main/action.yml)
-  now prefers permission profiles such as `:read-only` and `:workspace`, and
-  accepts an `output-schema-file` directly.
+- [Codex code review in GitHub](https://learn.chatgpt.com/docs/third-party/github)
+  uses ChatGPT-managed Codex access and documents manual `@codex review` requests
+  plus P0/P1-focused output.
+- [ChatGPT-managed auth in CI/CD](https://learn.chatgpt.com/docs/auth/ci-cd-auth)
+  requires trusted private automation, persistent and serialized `auth.json` use,
+  and secure handling of refreshed account tokens. It explicitly keeps API keys as
+  the simpler default, but this lab uses account auth because its owner uses
+  ChatGPT Pro rather than API billing.
 - [Custom code-review rules](https://developers.openai.com/blog/custom-code-review-rules-for-codex)
   recommends a small number of consequential, scoped rules with a safe path, while
   deterministic policy remains in normal CI.

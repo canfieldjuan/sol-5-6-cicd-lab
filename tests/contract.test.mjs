@@ -20,3 +20,9 @@ test("the contract rejects an unbounded blocker budget", async () => {
   contract.reviewPolicy.maxBlockers = 20;
   assert.match(validateContract(contract).join("\n"), /between 1 and 5/);
 });
+
+test("the contract rejects API billing as the default agent auth", async () => {
+  const contract = structuredClone(await readJson(path.join(rootDir, "ci-contract.json")));
+  contract.agentRuntime.authMode = "api-key";
+  assert.match(validateContract(contract).join("\n"), /must be chatgpt-managed/);
+});

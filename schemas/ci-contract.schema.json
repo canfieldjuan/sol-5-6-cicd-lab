@@ -4,7 +4,7 @@
   "title": "Portable CI contract",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "repository", "reviewPolicy", "checks", "sensitiveFiles"],
+  "required": ["schemaVersion", "repository", "reviewPolicy", "agentRuntime", "checks", "sensitiveFiles"],
   "properties": {
     "$schema": { "type": "string" },
     "schemaVersion": { "const": 1 },
@@ -32,6 +32,18 @@
         "singleComment": { "const": true },
         "automaticReview": { "const": false },
         "deepAuditArtifactOnly": { "const": true }
+      }
+    },
+    "agentRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authMode", "runnerLabels", "model", "defaultEffort", "serializeAccountJobs"],
+      "properties": {
+        "authMode": { "const": "chatgpt-managed" },
+        "runnerLabels": { "const": ["self-hosted", "linux", "codex-pro"] },
+        "model": { "const": "gpt-5.6-sol" },
+        "defaultEffort": { "enum": ["medium", "high", "xhigh", "max"] },
+        "serializeAccountJobs": { "const": true }
       }
     },
     "checks": {

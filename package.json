@@ -10,7 +10,9 @@
     "test": "node --test",
     "ci": "node scripts/run-contract.mjs --mode required",
     "ci:advisory": "node scripts/run-contract.mjs --mode advisory",
-    "scenario:list": "node scripts/scenarios.mjs list"
+    "scenario:list": "node scripts/scenarios.mjs list",
+    "eval:review": "node scripts/run-pro-eval.mjs review",
+    "eval:implementation": "node scripts/run-pro-eval.mjs implementation"
   },
   "engines": {
     "node": ">=20"

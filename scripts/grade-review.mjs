@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import { fail, isMain, readJson } from "./lib.mjs";
 import { validateReviewOutput } from "./validate-review-output.mjs";
 
+export function normalizeFixtureFindingPath(findingPath) {
+  return findingPath.startsWith("head/") ? findingPath.slice("head/".length) : findingPath;
+}
+
 export function gradeReview(scenario, output) {
   const errors = validateReviewOutput(output);
   if (errors.length) return errors;
@@ -29,7 +33,8 @@ async function main() {
   }
   const headDirectory = path.join(path.resolve(scenarioDirectory), "head");
   for (const blocker of Array.isArray(output.blockers) ? output.blockers : []) {
-    const target = path.resolve(headDirectory, blocker.path);
+    const findingPath = normalizeFixtureFindingPath(blocker.path);
+    const target = path.resolve(headDirectory, findingPath);
     if (!target.startsWith(`${headDirectory}${path.sep}`)) {
       errors.push(`Finding path escapes the scenario head: ${blocker.path}`);
       continue;
