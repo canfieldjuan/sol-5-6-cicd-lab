@@ -49,6 +49,8 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
   retry/session defects before an agent modifies them.
 - 2026-08-02: Initial hosted `CI / contract` run passed. Updated `setup-node` to
   pinned v6 after GitHub flagged v4's retired Actions runtime.
+- 2026-08-02: Dependabot opened five independent action-upgrade PRs on first push.
+  Updated the pins and grouped future action updates into one PR with a one-PR cap.
 
 ## Discoveries
 

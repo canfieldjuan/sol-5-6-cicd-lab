@@ -12,7 +12,7 @@ export async function checkWorkflows() {
     catch { errors.push(`Missing workflow: ${file}`); }
   }
   const routine = content.get("routine-review.yml") ?? "";
-  for (const anchor of ["workflow_dispatch:", "openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56", "model: gpt-5.6-sol", "permission-profile: \":read-only\"", "output-schema-file:", "drop-sudo", "upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093", "pull-requests: write"]) {
+  for (const anchor of ["workflow_dispatch:", "openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56", "model: gpt-5.6-sol", "permission-profile: \":read-only\"", "output-schema-file:", "drop-sudo", "upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", "pull-requests: write"]) {
     if (!routine.includes(anchor)) errors.push(`routine-review.yml is missing: ${anchor}`);
   }
   if (/^\s*pull_request:/m.test(routine)) errors.push("Routine review must not run automatically on every pull request");
