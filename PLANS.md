@@ -47,6 +47,8 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - 2026-08-02: PyYAML parsed all workflows and actionlint 1.7.12 reported no errors.
 - 2026-08-02: Confirmed both broken implementation fixtures fail on their labeled
   retry/session defects before an agent modifies them.
+- 2026-08-02: Initial hosted `CI / contract` run passed. Updated `setup-node` to
+  pinned v6 after GitHub flagged v4's retired Actions runtime.
 
 ## Discoveries
 
