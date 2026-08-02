@@ -37,7 +37,7 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - [x] Define the portable contract, review policy, schemas, and scenarios.
 - [x] Implement dependency-free validators, graders, and tests.
 - [x] Add pinned CI, bounded-review, deep-audit, and evaluation workflows.
-- [ ] Publish the private GitHub repository and observe the initial CI run.
+- [x] Publish the private GitHub repository and observe the initial CI run.
 
 ## Progress
 
@@ -51,6 +51,9 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
   pinned v6 after GitHub flagged v4's retired Actions runtime.
 - 2026-08-02: Dependabot opened five independent action-upgrade PRs on first push.
   Updated the pins and grouped future action updates into one PR with a one-PR cap.
+- 2026-08-02: Published the private repository and observed `CI / contract` pass
+  on the current action majors. GitHub rejected private-repository branch protection
+  with HTTP 403 because the account requires GitHub Pro for that feature.
 
 ## Discoveries
 

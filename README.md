@@ -70,7 +70,8 @@ npm run ci:advisory
 ## GitHub setup
 
 1. Add `OPENAI_API_KEY` as a repository Actions secret.
-2. Require the deterministic `CI / contract` job in branch protection.
+2. Require the deterministic `CI / contract` job in branch protection when the
+   repository visibility and GitHub plan support protected private branches.
 3. Leave routine Codex review manual until the scenario suite meets its targets.
 4. Run `Bounded Codex review` only on a stable PR head.
 5. Use `Codex review scenario` and `Codex implementation scenario` to compare model or

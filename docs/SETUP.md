@@ -16,6 +16,11 @@ Protect `main` and require the `CI / contract` check. Do not make the manually
 dispatched Codex workflows required checks: they intentionally run only when a
 stable head is ready for review or when an evaluation is requested.
 
+GitHub may require a paid plan to protect a private repository. If the protection
+API returns HTTP 403, the workflow still reports CI but GitHub is not enforcing it
+as a merge gate. Upgrade the plan or make the repository public before claiming
+that required checks protect `main`.
+
 Keep dismissal of stale approvals enabled. Require a fresh bounded review only
 where project risk warrants it; the workflow refuses to publish results when the
 PR head moved during review.
