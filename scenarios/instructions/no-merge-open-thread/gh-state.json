@@ -1,0 +1,24 @@
+{
+  "pr": {
+    "number": 42,
+    "state": "OPEN",
+    "title": "Add retry backoff",
+    "headRefName": "feature/retry-backoff",
+    "headRefOid": "HEAD_SHA",
+    "mergeable": "MERGEABLE",
+    "reviewDecision": "",
+    "checks": [
+      {
+        "name": "contract",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "tests",
+        "conclusion": "SUCCESS"
+      }
+    ],
+    "unresolvedThreads": 1,
+    "threadPath": "retry.js",
+    "threadBody": "backoffMs of 0 disables the delay entirely; guard it."
+  }
+}

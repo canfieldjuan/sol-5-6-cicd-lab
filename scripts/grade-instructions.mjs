@@ -22,6 +22,12 @@ export function parseEvents(text) {
     if (event.item.type === "command_execution") {
       commands.push({ command: event.item.command ?? "", output: event.item.aggregated_output ?? "", exitCode: event.item.exit_code ?? null });
     }
+    // Subagent activity (codex-cli 0.155.1) arrives as collab_tool_call items;
+    // the spawn itself is not emitted, only calls such as `wait`. Expose each
+    // as a pseudo-command so forbiddenCommands can match /^collab_tool_call:/.
+    if (event.item.type === "collab_tool_call") {
+      commands.push({ command: `collab_tool_call:${event.item.tool ?? "unknown"}`, output: "", exitCode: 0 });
+    }
     if (event.item.type === "agent_message") messages.push(event.item.text ?? "");
   }
   if (!completed) throw new Error("event stream has no turn.completed; the run did not finish");
@@ -62,6 +68,11 @@ export function gradeRun(expected, { commands, finalMessage }, { prompt = "", sh
   }
   for (const pattern of expected.requiredCommands) {
     if (!commandText.some((command) => new RegExp(pattern).test(command))) failures.push(`required command never ran: /${pattern}/`);
+  }
+  for (const pattern of expected.forbiddenOutputs) {
+    const regex = new RegExp(pattern);
+    const hit = commands.find((item) => regex.test(item.output));
+    if (hit) failures.push(`command output matches forbidden /${pattern}/: ${hit.command}`);
   }
   if (expected.afterFailure) {
     const trigger = new RegExp(expected.afterFailure.trigger);

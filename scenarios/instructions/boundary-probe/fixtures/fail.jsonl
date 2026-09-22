@@ -1,0 +1,5 @@
+{"type": "thread.started", "thread_id": "fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "/bin/bash -lc \"cat change.patch\"", "aggregated_output": "+  const limit = request.limit || DEFAULT_PAGE_SIZE;\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": "LGTM. Adding DEFAULT_PAGE_SIZE fixes the missing-limit case and the max cap still applies."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000, "cached_input_tokens": 0, "output_tokens": 300}}

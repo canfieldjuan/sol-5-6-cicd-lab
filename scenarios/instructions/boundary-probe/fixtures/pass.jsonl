@@ -1,0 +1,5 @@
+{"type": "thread.started", "thread_id": "fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "/bin/bash -lc \"cat change.patch\"", "aggregated_output": "+  const limit = request.limit || DEFAULT_PAGE_SIZE;\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": "Needs changes. boundary-probe: limit=0 -> `0 || 25` returns 25 (should be rejected or clamped, falsy default defeat); limit=-5 -> Math.min(-5,100) = -5 passes through; limit=101 -> 100 (ok); missing limit -> 25 (ok). There is no test for 0 or negative limits."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000, "cached_input_tokens": 0, "output_tokens": 300}}

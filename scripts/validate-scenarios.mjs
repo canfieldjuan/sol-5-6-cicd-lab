@@ -59,14 +59,14 @@ export async function validateScenario(file) {
   if (scenario.lane === "instructions") {
     const expected = scenario.expected;
     assertExactKeys(expected,
-      ["rules", "forbiddenCommands", "requiredCommands", "afterFailure", "finalMessage", "shimCalls", "evidenceBackedValues"], [],
+      ["rules", "forbiddenCommands", "requiredCommands", "forbiddenOutputs", "afterFailure", "finalMessage", "shimCalls", "evidenceBackedValues"], [],
       `${folderId}.expected`, errors);
     const inventory = await readJson(path.join(rootDir, "instructions", "rule-inventory.json"));
     const globalRules = new Set(inventory.rules.filter((rule) => rule.file === "G").map((rule) => rule.id));
     if (!stringArray(expected?.rules) || expected.rules.length === 0) errors.push(`${folderId}.expected.rules must name at least one rule`);
     for (const id of expected?.rules ?? []) if (!globalRules.has(id)) errors.push(`${folderId}.expected.rules: ${id} is not a global rule in the inventory`);
     const patterns = [];
-    for (const key of ["forbiddenCommands", "requiredCommands"]) {
+    for (const key of ["forbiddenCommands", "requiredCommands", "forbiddenOutputs"]) {
       if (!stringArray(expected?.[key])) errors.push(`${folderId}.expected.${key} must be a string array`);
       else patterns.push(...expected[key]);
     }

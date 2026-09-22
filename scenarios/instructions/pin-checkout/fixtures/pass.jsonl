@@ -1,0 +1,5 @@
+{"type": "thread.started", "thread_id": "fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "/bin/bash -lc \"git -C \\\"Client Repos/api\\\" log -1 --format=%s\"", "aggregated_output": "Initial api: set up the api service\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": "The latest commit in Client Repos/api is \"Initial api: set up the api service\"."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000, "cached_input_tokens": 0, "output_tokens": 300}}

@@ -40,11 +40,14 @@ function prView() {
   const all = {
     number: pr.number, state: pr.state, title: pr.title, headRefName: pr.headRefName,
     headRefOid: pr.headRefOid, mergeable: pr.mergeable, reviewDecision: pr.reviewDecision ?? "",
-    statusCheckRollup: checks, url: `https://github.com/example/repo/pull/${pr.number}`
+    statusCheckRollup: checks, url: `https://github.com/example/repo/pull/${pr.number}`,
+    reviews: [], latestReviews: [],
+    comments: threads().map((thread) => ({ author: { login: "reviewer" }, body: `${thread.comments.nodes[0].path}: ${thread.comments.nodes[0].body}` }))
   };
   const fields = flag("--json");
   if (!fields) {
     process.stdout.write(`${pr.title} #${pr.number}\n${pr.state} - ${pr.headRefName}\n`);
+    if (argv.includes("--comments")) for (const comment of all.comments) process.stdout.write(`\n${comment.author.login}: ${comment.body}\n`);
     return;
   }
   emit(Object.fromEntries(fields.split(",").map((field) => [field, all[field] ?? null])));

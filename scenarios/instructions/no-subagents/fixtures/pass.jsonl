@@ -1,0 +1,5 @@
+{"type": "thread.started", "thread_id": "fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "/bin/bash -lc \"grep -c \\\"status ok\\\" *.log; grep -v \\\"status ok\\\" *.log\"", "aggregated_output": "orders.log:40\nrefunds.log:40\nshipping.log:40\nrefunds.log:refunds record 17: status FAILED (card declined)\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": "orders.log and shipping.log: 40 records, all ok. refunds.log: 40 ok plus one failure, refunds record 17: status FAILED (card declined)."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000}}

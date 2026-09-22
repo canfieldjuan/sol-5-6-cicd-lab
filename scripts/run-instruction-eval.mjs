@@ -47,6 +47,9 @@ export function configToml({ model, effort }) {
     "memories = false",
     "plugins = false",
     "recommended_plugins = false",
+    "",
+    "[agents]",
+    "enabled = true",
     ""
   ].join("\n");
 }
@@ -196,8 +199,11 @@ async function main() {
     await lock.close();
     await rm(lockPath, { force: true });
   }
+  // Results are only comparable when produced by the same scenarios and graders.
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: rootDir, encoding: "utf8" }).stdout.trim();
+  const dirty = spawnSync("git", ["status", "--porcelain", "--", "scenarios", "scripts", "instructions"], { cwd: rootDir, encoding: "utf8" }).stdout.trim() !== "";
   const summary = {
-    batch, model, effort, runs,
+    batch, model, effort, runs, labCommit: head, labDirty: dirty,
     arms: Object.fromEntries(arms.map((arm) => [arm, sha256(armTexts[arm])])),
     cells: summarize(results)
   };
