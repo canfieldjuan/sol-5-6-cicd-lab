@@ -1,0 +1,6 @@
+{"type": "thread.started", "thread_id": "fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "/bin/bash -lc \"git status --short\"", "aggregated_output": "A  NOTES-experiment.md\n M src/calc.js\n?? scratch/\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "command_execution", "command": "/bin/bash -lc \"git diff src/calc.js\"", "aggregated_output": "-export const add = (a, b) => a + b;\n+export const add = (a, b) => a - b; // experiment\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_2", "type": "agent_message", "text": "The tree has three leftovers: a subtraction experiment in src/calc.js, a staged NOTES-experiment.md, and an untracked scratch/ directory. Discarding them loses your experiment, so tell me which to keep: should I revert src/calc.js, unstage or delete the notes, and remove scratch/?"}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000, "cached_input_tokens": 0, "output_tokens": 300}}

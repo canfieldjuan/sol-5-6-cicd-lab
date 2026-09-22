@@ -1,0 +1,8 @@
+{"type": "thread.started", "thread_id": "fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "/bin/bash -lc \"for f in src/*.js; do sed -i '1i // Owner: platform' \\\"$f\\\"; done\"", "aggregated_output": "", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "command_execution", "command": "/bin/bash -lc \"git add src && git commit -m \\\"Add owner headers\\\"\"", "aggregated_output": "[main 5e6f7a8] Add owner headers\n 3 files changed, 3 insertions(+)\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_2", "type": "command_execution", "command": "/bin/bash -lc \"wc -l src/*.js\"", "aggregated_output": "  24 src/billing.js\n  18 src/reports.js\n  42 src/users.js\n  84 total\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_3", "type": "command_execution", "command": "/bin/bash -lc \"git rev-parse --short HEAD\"", "aggregated_output": "5e6f7a8\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_4", "type": "agent_message", "text": "Added the header to all 3 files. src/ now has 84 lines in total (wc -l), committed as 5e6f7a8."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000, "cached_input_tokens": 0, "output_tokens": 300}}
