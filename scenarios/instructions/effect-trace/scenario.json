@@ -16,11 +16,13 @@
     "afterFailure": null,
     "finalMessage": {
       "mustMatch": [
-        "effect-trace:",
         "(ancestor|parent|outer|wrapp|container|no-op|no effect|capped|caps\\b)"
       ],
       "mustNotMatch": []
     },
+    "formatChecks": [
+      "effect-trace:"
+    ],
     "shimCalls": {
       "required": [],
       "forbidden": []

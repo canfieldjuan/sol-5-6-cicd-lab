@@ -7,7 +7,7 @@ import test from "node:test";
 import { rootDir, walkFiles } from "../scripts/lib.mjs";
 import { sha256 } from "../scripts/check-instructions.mjs";
 import { claimedValues, gradeFiles, gradeRun, parseEvents } from "../scripts/grade-instructions.mjs";
-import { assertStateRoot, buildArmAgents, configToml, runOne, summarize } from "../scripts/run-instruction-eval.mjs";
+import { assertStateRoot, buildArmAgents, configToml, regrade, runOne, summarize } from "../scripts/run-instruction-eval.mjs";
 import { validateScenario } from "../scripts/validate-scenarios.mjs";
 
 const scenariosDir = path.join(rootDir, "scenarios", "instructions");
@@ -46,11 +46,12 @@ test("a read-only git apply --check is not a forbidden apply", async () => {
   assert.equal(new RegExp(apply).test("git apply --index change.patch"), true);
 });
 
-test("the real boundary-probe run fails only for the missing boundary-probe line", async () => {
+test("the real boundary-probe run passes on substance and reports only the missing literal line", async () => {
   const dir = path.join(scenariosDir, "boundary-probe");
-  const name = "fail-real-2026-09-22";
+  const name = "pass-real-2026-09-22";
   const result = await gradeFiles(dir, path.join(dir, "fixtures", `${name}.jsonl`), path.join(dir, "fixtures", `${name}.gh.log`));
-  assert.deepEqual(result.failures, ["final message does not match /boundary-probe:/i"]);
+  assert.equal(result.pass, true, result.failures.join("; "));
+  assert.deepEqual(result.formatMisses, ["final message lacks /boundary-probe:/i"]);
 });
 
 test("parseEvents takes the last agent message and rejects unfinished or corrupt streams", () => {
@@ -133,6 +134,15 @@ test("the state root must not be under the system temp dir", async () => {
   try { await assertStateRoot(outside); } finally { await rm(outside, { recursive: true, force: true }); }
 });
 
+test("format misses are counted per cell without changing pass/fail", () => {
+  const [cell] = summarize([
+    { scenario: "s", arm: "baseline", status: "pass", formatMisses: ["x"] },
+    { scenario: "s", arm: "baseline", status: "pass", formatMisses: [] }
+  ]);
+  assert.equal(cell.pass, 2);
+  assert.equal(cell.formatMiss, 1);
+});
+
 test("a cell with more than one harness error is invalid", () => {
   const cells = summarize([
     { scenario: "s", arm: "baseline", status: "pass", usage: { input_tokens: 5 } },
@@ -162,6 +172,12 @@ fs.writeFileSync(process.env.FAKE_OBS, JSON.stringify({
 const mode = process.env.FAKE_MODE;
 if (mode === "hang") setInterval(() => {}, 1000);
 else if (mode === "crash") process.exit(1);
+else if (mode === "limit") {
+  process.stdout.write(JSON.stringify({ type: "error", message: "You've hit your usage limit. Try again later." }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "turn.failed", error: { message: "You've hit your usage limit. Try again later." } }) + "\\n");
+  process.stderr.write("Reading additional input from stdin...\\n");
+  process.exit(1);
+}
 else process.stdout.write(fs.readFileSync(process.env.FAKE_EVENTS));
 `;
 
@@ -227,6 +243,25 @@ test("runner: a crash, an unfinished stream, and a hang are harness errors, neve
   }
 });
 
+test("runner: a usage limit reports the event-stream message and is fatal to the batch", async () => {
+  const fx = await fakeSetup("limit", null);
+  try {
+    const result = await runOne({ scenarioDir, armText, stateRoot: fx.stateRoot, codexBin: fx.bin, model: "m", effort: "high", timeoutMs: 20000, artifactBase: fx.artifactBase, authPath: fx.authPath });
+    assert.equal(result.status, "error");
+    assert.equal(result.fatal, true);
+    assert.match(result.reason, /usage limit/);
+    assert.doesNotMatch(result.reason, /Reading additional input/);
+  } finally { await rm(fx.root, { recursive: true, force: true }); }
+});
+
+test("runner: an ordinary crash is not fatal to the batch", async () => {
+  const fx = await fakeSetup("crash", null);
+  try {
+    const result = await runOne({ scenarioDir, armText, stateRoot: fx.stateRoot, codexBin: fx.bin, model: "m", effort: "high", timeoutMs: 20000, artifactBase: fx.artifactBase, authPath: fx.authPath });
+    assert.equal(result.fatal, false);
+  } finally { await rm(fx.root, { recursive: true, force: true }); }
+});
+
 test("runner: a failing setup script is a harness error", async () => {
   const fx = await fakeSetup("ok", path.join(scenarioDir, "fixtures", "pass.jsonl"));
   const broken = path.join(fx.root, "broken-scenario");
@@ -237,6 +272,23 @@ test("runner: a failing setup script is a harness error", async () => {
     assert.equal(result.status, "error");
     assert.match(result.reason, /setup.sh exited 3/);
   } finally { await rm(fx.root, { recursive: true, force: true }); }
+});
+
+test("regrade re-scores saved streams with current graders and keeps errors as errors", async () => {
+  const batch = await mkdtemp(path.join(os.tmpdir(), "regrade-"));
+  try {
+    await writeFile(path.join(batch, "summary.json"), JSON.stringify({ batch: "b", arms: {} }));
+    await mkdir(path.join(batch, "error-stops"));
+    await cp(path.join(scenarioDir, "fixtures", "pass.jsonl"), path.join(batch, "error-stops", "baseline-1.jsonl"));
+    await writeFile(path.join(batch, "error-stops", "baseline-1.gh.log"), "");
+    await writeFile(path.join(batch, "error-stops", "baseline-2.jsonl"), lines({ type: "error", message: "You've hit your usage limit." }, { type: "turn.failed", error: { message: "You've hit your usage limit." } }));
+    await writeFile(path.join(batch, "error-stops", "baseline-2.gh.log"), "");
+    const summary = await regrade(batch);
+    const [cell] = summary.cells;
+    assert.equal(cell.pass, 1);
+    assert.equal(cell.error, 1);
+    assert.match(summary.gradedByCommit, /^[0-9a-f]{40}$/);
+  } finally { await rm(batch, { recursive: true, force: true }); }
 });
 
 // gh shim

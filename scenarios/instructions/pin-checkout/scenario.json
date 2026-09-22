@@ -19,6 +19,7 @@
       ],
       "mustNotMatch": []
     },
+    "formatChecks": [],
     "shimCalls": {
       "required": [],
       "forbidden": []

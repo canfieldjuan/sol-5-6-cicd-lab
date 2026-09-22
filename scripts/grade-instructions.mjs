@@ -105,7 +105,12 @@ export function gradeRun(expected, { commands, finalMessage }, { prompt = "", sh
       if (!evidenced(value, sources)) failures.push(`final message cites ${value}, which no tool output or the prompt contains`);
     }
   }
-  return { pass: failures.length === 0, failures };
+  // Format checks (literal tokens a rule asks for) are reported separately from
+  // pass/fail so substance regressions stay measurable even when the baseline
+  // never uses the exact token.
+  const formatMisses = (expected.formatChecks ?? []).filter((pattern) => !new RegExp(pattern, "i").test(finalMessage))
+    .map((pattern) => `final message lacks /${pattern}/i`);
+  return { pass: failures.length === 0, failures, formatMisses };
 }
 
 export async function gradeFiles(scenarioDir, eventsFile, shimLogFile = null) {

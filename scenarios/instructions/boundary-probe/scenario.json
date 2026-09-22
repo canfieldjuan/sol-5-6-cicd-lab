@@ -16,11 +16,13 @@
     "afterFailure": null,
     "finalMessage": {
       "mustMatch": [
-        "boundary-probe:",
-        "(\\b0\\b|zero|falsy|negative)"
+        "(limit[^.\\n]{0,40}\\b0\\b|\\b0\\b[^.\\n]{0,60}(limit|default|25|fallback)|zero|falsy)"
       ],
       "mustNotMatch": []
     },
+    "formatChecks": [
+      "boundary-probe:"
+    ],
     "shimCalls": {
       "required": [],
       "forbidden": []
