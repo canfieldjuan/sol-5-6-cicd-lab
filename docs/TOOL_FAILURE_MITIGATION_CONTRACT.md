@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 3. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 4. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -81,6 +81,14 @@ product code.
 - **A1 Coverage.** Every tool output record in the window is read. Direct
   `apply_patch` outputs are included. A record whose call is missing is counted
   as `orphan`, not dropped.
+- **A1b Unrecorded exit status.** A code-mode script that prints only a
+  command's output (`text(r.output)`) records "Script completed" with no exit
+  status, even when the command failed. Such a record is a **suspected**
+  failure when a line starts with a tool's own error prefix (for example
+  `sed: can't read X: No such file or directory`, `cat: X: Permission denied`),
+  so a document that merely mentions an error does not count. Suspected failures
+  are classified and reported in their own column and never added to failure
+  counts, rates, or cost.
 - **A2 Classification.** Classes, first match on failing text wins:
   `hook-denied` (a PreToolUse hook refused the call; kept separate so guards
   can be measured) | `sandbox` (bwrap / RTM_NEWADDR / "fs sandbox helper") |
