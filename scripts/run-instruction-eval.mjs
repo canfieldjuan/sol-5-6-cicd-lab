@@ -47,6 +47,9 @@ export function configToml({ model, effort }) {
     "memories = false",
     "plugins = false",
     "recommended_plugins = false",
+    "",
+    "[agents]",
+    "enabled = true",
     ""
   ].join("\n");
 }
@@ -71,6 +74,19 @@ function runProcess(command, args, { cwd, env, timeoutMs, stdoutFile }) {
       resolve({ code, timedOut, stderr });
     });
   });
+}
+
+export async function eventStreamError(eventsFile) {
+  let text;
+  try { text = await readFile(eventsFile, "utf8"); } catch { return null; }
+  for (const line of text.split("\n")) {
+    try {
+      const event = JSON.parse(line);
+      if (event.type === "error" && event.message) return event.message;
+      if (event.type === "turn.failed" && event.error?.message) return event.error.message;
+    } catch {}
+  }
+  return null;
 }
 
 export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "codex", model, effort, timeoutMs, artifactBase, authPath }) {
@@ -112,10 +128,16 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
     const result = await runProcess(codexBin, ["exec", "--json", "--skip-git-repo-check", prompt],
       { cwd: fixture, env, timeoutMs, stdoutFile: eventsFile });
     if (result.timedOut) return { status: "error", reason: `timed out after ${timeoutMs} ms` };
-    if (result.code !== 0) return { status: "error", reason: `codex exited ${result.code}: ${result.stderr.slice(-300)}` };
+    if (result.code !== 0) {
+      // The event stream carries the real cause; stderr only has CLI notices.
+      const streamError = await eventStreamError(eventsFile);
+      const reason = `codex exited ${result.code}: ${streamError ?? result.stderr.slice(-300)}`;
+      // A usage limit fails every later run too, so the batch must stop.
+      return { status: "error", reason, fatal: /usage limit/i.test(streamError ?? "") };
+    }
     try {
       const graded = await gradeFiles(scenarioDir, eventsFile, shimLog);
-      return { status: graded.pass ? "pass" : "fail", failures: graded.failures, usage: graded.usage };
+      return { status: graded.pass ? "pass" : "fail", failures: graded.failures, formatMisses: graded.formatMisses, usage: graded.usage };
     } catch (error) {
       return { status: "error", reason: error.message };
     }
@@ -129,8 +151,9 @@ export function summarize(results) {
   const cells = new Map();
   for (const result of results) {
     const key = `${result.scenario}\t${result.arm}`;
-    const cell = cells.get(key) ?? { scenario: result.scenario, arm: result.arm, pass: 0, fail: 0, error: 0, inputTokens: [] };
+    const cell = cells.get(key) ?? { scenario: result.scenario, arm: result.arm, pass: 0, fail: 0, error: 0, formatMiss: 0, inputTokens: [] };
     cell[result.status] += 1;
+    if (result.formatMisses?.length) cell.formatMiss += 1;
     if (result.usage?.input_tokens) cell.inputTokens.push(result.usage.input_tokens);
     cells.set(key, cell);
   }
@@ -148,7 +171,39 @@ function argValue(name, fallback) {
   return index >= 0 ? process.argv[index + 1] : fallback;
 }
 
+// Re-grades a saved batch with the current graders (no model calls). Runs
+// that errored stay errors; the output records which lab commit graded it.
+export async function regrade(batchDir) {
+  const original = JSON.parse(await readFile(path.join(batchDir, "summary.json"), "utf8"));
+  const results = [];
+  for (const file of (await walkFiles(batchDir)).filter((name) => name.endsWith(".jsonl"))) {
+    const scenario = path.basename(path.dirname(file));
+    const match = /^(.+)-(\d+)\.jsonl$/.exec(path.basename(file));
+    if (!match) continue;
+    const arm = match[1].replace(/^ablate-/, "ablate:");
+    const scenarioDir = path.join(rootDir, "scenarios", "instructions", scenario);
+    try {
+      const graded = await gradeFiles(scenarioDir, file, file.replace(/\.jsonl$/, ".gh.log"));
+      results.push({ scenario, arm, run: Number(match[2]), status: graded.pass ? "pass" : "fail", failures: graded.failures, formatMisses: graded.formatMisses, usage: graded.usage });
+    } catch (error) {
+      results.push({ scenario, arm, run: Number(match[2]), status: "error", reason: (await eventStreamError(file)) ?? error.message });
+    }
+  }
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: rootDir, encoding: "utf8" }).stdout.trim();
+  const summary = { ...original, regradedAt: new Date().toISOString(), gradedByCommit: head, cells: summarize(results) };
+  await writeFile(path.join(batchDir, "summary.regraded.json"), JSON.stringify(summary, null, 2) + "\n");
+  return summary;
+}
+
 async function main() {
+  const regradeDir = argValue("--regrade", null);
+  if (regradeDir) {
+    const summary = await regrade(path.resolve(regradeDir));
+    for (const cell of summary.cells) {
+      console.log(`${cell.scenario.padEnd(26)} ${cell.arm.padEnd(14)} pass ${cell.pass}/${cell.pass + cell.fail + cell.error}${cell.error ? ` (errors ${cell.error})` : ""}${cell.formatMiss ? ` (format misses ${cell.formatMiss})` : ""}${cell.valid ? "" : " INVALID"}`);
+    }
+    return;
+  }
   const arms = argValue("--arms", "baseline").split(",");
   const scenarioArg = argValue("--scenario", "all");
   const runs = Number(argValue("--runs", "3"));
@@ -180,8 +235,9 @@ async function main() {
   const artifactRoot = path.join(rootDir, "artifacts", "instructions", batch);
   const authPath = path.join(process.env.CODEX_HOME || path.join(home, ".codex"), "auth.json");
   const results = [];
+  let aborted = null;
   try {
-    for (const id of ids) {
+    batch: for (const id of ids) {
       const scenarioDir = path.join(rootDir, "scenarios", "instructions", id);
       for (const arm of arms) {
         for (let run = 1; run <= runs; run += 1) {
@@ -189,6 +245,7 @@ async function main() {
           const result = await runOne({ scenarioDir, armText: armTexts[arm], stateRoot, model, effort, timeoutMs, artifactBase, authPath });
           results.push({ scenario: id, arm, run, ...result });
           console.log(`${id} ${arm} #${run}: ${result.status}${result.failures?.length ? ` (${result.failures.join("; ")})` : ""}${result.reason ? ` (${result.reason})` : ""}`);
+          if (result.fatal) { aborted = result.reason; break batch; }
         }
       }
     }
@@ -196,17 +253,21 @@ async function main() {
     await lock.close();
     await rm(lockPath, { force: true });
   }
+  // Results are only comparable when produced by the same scenarios and graders.
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: rootDir, encoding: "utf8" }).stdout.trim();
+  const dirty = spawnSync("git", ["status", "--porcelain", "--", "scenarios", "scripts", "instructions"], { cwd: rootDir, encoding: "utf8" }).stdout.trim() !== "";
   const summary = {
-    batch, model, effort, runs,
+    batch, model, effort, runs, labCommit: head, labDirty: dirty, aborted,
     arms: Object.fromEntries(arms.map((arm) => [arm, sha256(armTexts[arm])])),
     cells: summarize(results)
   };
   await mkdir(artifactRoot, { recursive: true });
   await writeFile(path.join(artifactRoot, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
   for (const cell of summary.cells) {
-    console.log(`${cell.scenario.padEnd(26)} ${cell.arm.padEnd(14)} pass ${cell.pass}/${cell.pass + cell.fail + cell.error}${cell.error ? ` (errors ${cell.error})` : ""}${cell.valid ? "" : " INVALID"}`);
+    console.log(`${cell.scenario.padEnd(26)} ${cell.arm.padEnd(14)} pass ${cell.pass}/${cell.pass + cell.fail + cell.error}${cell.error ? ` (errors ${cell.error})` : ""}${cell.formatMiss ? ` (format misses ${cell.formatMiss})` : ""}${cell.valid ? "" : " INVALID"}`);
   }
   console.log(`Summary: ${path.relative(rootDir, path.join(artifactRoot, "summary.json"))}`);
+  if (aborted) fail(`Batch aborted: ${aborted}`);
 }
 
 if (isMain(import.meta.url)) await main().catch((error) => fail(error.message));

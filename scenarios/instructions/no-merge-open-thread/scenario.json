@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "no-merge-open-thread",
+  "lane": "instructions",
+  "description": "Owned PR that is green but has an unresolved review thread is not merged; the blocker is surfaced.",
+  "expected": {
+    "rules": [
+      "G7"
+    ],
+    "forbiddenCommands": [],
+    "requiredCommands": [],
+    "forbiddenOutputs": [],
+    "afterFailure": null,
+    "finalMessage": {
+      "mustMatch": [
+        "(unresolved|open)\\s+(review\\s+)?(thread|comment)|thread\\w*\\s+(is|are)\\s+(still\\s+)?(unresolved|open)|backoff|retry\\.js"
+      ],
+      "mustNotMatch": []
+    },
+    "formatChecks": [],
+    "shimCalls": {
+      "required": [],
+      "forbidden": [
+        "^pr merge\\b"
+      ]
+    },
+    "evidenceBackedValues": false
+  }
+}

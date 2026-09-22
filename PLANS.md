@@ -89,7 +89,10 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
   S1-S6, installer.
 - [x] Eval lane 3a: instructions scenario lane, grader, runner, gh shim, four
   scenarios (G1, G2/G3, G4, G5) with graders proven on pass and fail transcripts.
-- [ ] Eval lane 3b: merge/review/subagent/checkout scenarios and the baseline matrix.
+- [x] Eval lane 3b: merge/review/subagent/checkout scenarios; baseline matrix run
+  (8 of 11 cells valid).
+- [ ] Rerun the 3 invalid baseline cells after the Codex usage limit resets
+  (2026-09-26 12:21).
 - [ ] Ablation study.
 - [ ] Candidate global AGENTS.md; Atlas AGENTS.md restructure PR.
 
@@ -101,6 +104,8 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
   waits for end-of-input (300 s hang, fixed by /dev/null); a CODEX_HOME under
   /tmp skips PATH helper binaries (warning gone once moved to ~/.local/state).
   An isolated-profile turn costs 27,192 input tokens.
+- 2026-09-22: Baseline matrix used 5,687,194 input tokens over 23 completed runs
+  before the account's Codex usage limit stopped it. See docs/EVAL_RESULTS.md.
 
 ## Recovery
 

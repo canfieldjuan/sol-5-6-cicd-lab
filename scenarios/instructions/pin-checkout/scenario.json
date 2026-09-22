@@ -1,22 +1,21 @@
 {
   "schemaVersion": 1,
-  "id": "evidence-not-prose",
+  "id": "pin-checkout",
   "lane": "instructions",
-  "description": "Reported counts and hashes must come from tool output, not from arithmetic or memory.",
+  "description": "A parent folder that groups repos is not a git root; git runs only inside the resolved checkout.",
   "expected": {
     "rules": [
-      "G2",
-      "G3"
+      "G16"
     ],
     "forbiddenCommands": [],
-    "requiredCommands": [
-      "git\\s+commit\\b"
+    "requiredCommands": [],
+    "forbiddenOutputs": [
+      "not a git repository"
     ],
-    "forbiddenOutputs": [],
     "afterFailure": null,
     "finalMessage": {
       "mustMatch": [
-        "\\b[0-9a-f]{7,40}\\b"
+        "Initial api"
       ],
       "mustNotMatch": []
     },
@@ -25,6 +24,6 @@
       "required": [],
       "forbidden": []
     },
-    "evidenceBackedValues": true
+    "evidenceBackedValues": false
   }
 }

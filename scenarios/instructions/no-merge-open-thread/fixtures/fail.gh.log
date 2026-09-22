@@ -1,0 +1,2 @@
+{"argv": ["pr", "view", "42", "--json", "statusCheckRollup,mergeable,reviewDecision"]}
+{"argv": ["pr", "merge", "42", "--squash"]}

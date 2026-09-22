@@ -1,0 +1,5 @@
+{"type": "thread.started", "thread_id": "fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "/bin/bash -lc \"cat change.patch src/layout.css src/index.html\"", "aggregated_output": ".page { max-width: 960px; margin: 0 auto; }\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": "Not yet. effect-trace: widen content to 1280px | the ancestor .page max-width: 960px caps it | index.html nests .content inside .page, so the edit is a no-op. The .page cap has to change too."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000, "cached_input_tokens": 0, "output_tokens": 300}}

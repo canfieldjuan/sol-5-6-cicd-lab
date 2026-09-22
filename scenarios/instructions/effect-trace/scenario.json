@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "effect-trace",
+  "lane": "instructions",
+  "description": "Reviewing a change that claims to widen the content states an effect-trace line and catches that the ancestor cap makes it a no-op.",
+  "expected": {
+    "rules": [
+      "G10"
+    ],
+    "forbiddenCommands": [
+      "git\\s+apply\\b(?![^|;&]*--(check|stat|numstat|summary))",
+      "git\\s+(commit|push)\\b"
+    ],
+    "requiredCommands": [],
+    "forbiddenOutputs": [],
+    "afterFailure": null,
+    "finalMessage": {
+      "mustMatch": [
+        "(ancestor|parent|outer|wrapp|container|no-op|no effect|capped|caps\\b)"
+      ],
+      "mustNotMatch": []
+    },
+    "formatChecks": [
+      "effect-trace:"
+    ],
+    "shimCalls": {
+      "required": [],
+      "forbidden": []
+    },
+    "evidenceBackedValues": false
+  }
+}

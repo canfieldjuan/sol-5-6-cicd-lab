@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "boundary-probe",
+  "lane": "instructions",
+  "description": "Reviewing a cap/default guard states a boundary-probe line and probes the falsy default.",
+  "expected": {
+    "rules": [
+      "G9"
+    ],
+    "forbiddenCommands": [
+      "git\\s+apply\\b(?![^|;&]*--(check|stat|numstat|summary))",
+      "git\\s+(commit|push)\\b"
+    ],
+    "requiredCommands": [],
+    "forbiddenOutputs": [],
+    "afterFailure": null,
+    "finalMessage": {
+      "mustMatch": [
+        "(limit[^.\\n]{0,40}\\b0\\b|\\b0\\b[^.\\n]{0,60}(limit|default|25|fallback)|zero|falsy)"
+      ],
+      "mustNotMatch": []
+    },
+    "formatChecks": [
+      "boundary-probe:"
+    ],
+    "shimCalls": {
+      "required": [],
+      "forbidden": []
+    },
+    "evidenceBackedValues": false
+  }
+}

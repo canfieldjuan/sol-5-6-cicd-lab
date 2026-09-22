@@ -1,0 +1,8 @@
+{"argv":["pr","view","42","--json","number,title,body,state,isDraft,headRefName,headRefOid,baseRefName,baseRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,reviews,latestReviews,reviewRequests,url"]}
+{"argv":["pr","view","42","--comments"]}
+{"argv":["api","repos/example/repo/pulls/42/comments"]}
+{"argv":["pr","checks","42","--required"]}
+{"argv":["api","repos/example/repo/pulls/42/reviews"]}
+{"argv":["pr","view","42","--json","comments"]}
+{"argv":["pr","comment","42","--body","@codex review. Please review the current head. retry.js:2 exports a fixed, positive 250 ms backoff; the existing zero-delay comment does not match this diff."]}
+{"argv":["api","-X","POST","repos/example/repo/issues/42/comments","-f","body=@codex review. Please review the current head; retry.js:2 exports a fixed 250 ms backoff."]}
