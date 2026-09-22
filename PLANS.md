@@ -107,6 +107,15 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - 2026-09-22: Baseline matrix used 5,687,194 input tokens over 23 completed runs
   before the account's Codex usage limit stopped it. See docs/EVAL_RESULTS.md.
 
+## Tool-failure mitigation (docs/TOOL_FAILURE_MITIGATION_CONTRACT.md)
+
+- [x] Contract accepted (PR #10); revisions 2-4 from implementation findings.
+- [x] Step 1: analyzer with fixtures; Jul-Sep baseline in docs/TOOL_FAILURE_BASELINE.md.
+- [ ] Step 2: live hook probe.
+- [ ] Step 3: guards and helpers in the ranked order.
+- [ ] Step 4: Codex ports of evidence-gate and round-guard.
+- [ ] Step 5: before/after measurement and AGENTS.md trim candidates.
+
 ## Recovery
 
 Run `git status`, `npm run check`, `npm run ci:advisory`, and actionlint. Compare the
