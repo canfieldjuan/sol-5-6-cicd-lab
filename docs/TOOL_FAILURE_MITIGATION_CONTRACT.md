@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 2. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 3. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -82,19 +82,26 @@ product code.
   `apply_patch` outputs are included. A record whose call is missing is counted
   as `orphan`, not dropped.
 - **A2 Classification.** Classes, first match on failing text wins:
-  `sandbox` (bwrap / RTM_NEWADDR / "fs sandbox helper") | `bad-workdir`
-  ("Failed to create unified exec process") | `patch-stale` ("Failed to find
-  expected lines" / "Failed to find context") | `patch-malformed` (invalid hunk,
-  multiple operations, empty hunk) | `wrong-repo-script` (`scripts/X: No such
-  file` where X exists in another known repo) | `path-missing` | `permission` |
-  `db-auth` (peer/password auth, missing role) | `db-sql` | `gh-usage` (unknown
-  JSON field, GraphQL error) | `js-wrapper` (raised by the code-mode wrapper
-  itself: a stack frame in `exec_main.mjs`, or a JavaScript error name reported
-  after `Script error:` with no Python traceback marker; a JS parse error has no
-  stack frame) |
-  `shell-quoting` | `command-missing` | `network` | `timeout` | `stdin-dead`
-  ("Unknown process id") | `interactive-only` | `expected-test` |
-  `other`. A Python `SyntaxError` is never `js-wrapper`.
+  `hook-denied` (a PreToolUse hook refused the call; kept separate so guards
+  can be measured) | `sandbox` (bwrap / RTM_NEWADDR / "fs sandbox helper") |
+  `bad-workdir` ("Failed to create unified exec process") | `patch-stale`
+  ("Failed to find expected lines" / "Failed to find context") |
+  `patch-malformed` (invalid hunk, multiple operations, empty hunk) |
+  `wrong-repo-script` (`scripts/X: No such file` where X exists in another
+  known repo) | `path-missing` | `permission` | `vcs-auth` (git/gh credential
+  rejected) | `db-auth` (peer/password auth, missing role) | `db-sql` |
+  `gh-usage` (unknown JSON field, GraphQL error, including a bare
+  `{"errors":[...]}` response) | `jq-usage` (jq path or type error) |
+  `js-wrapper` (raised by the code-mode wrapper itself: a stack frame in
+  `exec_main.mjs`, or a JavaScript error name reported after `Script error:`
+  with no Python traceback marker; a JS parse error has no stack frame) |
+  `shell-quoting` | `command-missing` | `resource-busy` (port or container name
+  already in use) | `network` | `timeout` | `stdin-dead` ("Unknown process id") |
+  `interactive-only` | `expected-check` (a test, lint, type, build, or checker
+  failure: legitimate development signal, not tool misuse) | `other`. A Python
+  `SyntaxError` is never `js-wrapper`. Every class except `expected-check` and
+  `other` is mechanical.
+
 - **A3 Cost.** Cost is the step cost (section 3). The report shows count, share
   of calls, uncached cost, and recovered/repeated per class, per model.
 - **A4 Determinism.** Same input files produce byte-identical JSON output.
