@@ -87,7 +87,9 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - [x] Contract accepted (PR #6) and revised (check modes, installer state).
 - [x] Tracked global AGENTS.md, Atlas snapshot, rule inventory, structural checks
   S1-S6, installer.
-- [ ] Eval lane: shims, runner, graders with failing fixtures, baseline matrix.
+- [x] Eval lane 3a: instructions scenario lane, grader, runner, gh shim, four
+  scenarios (G1, G2/G3, G4, G5) with graders proven on pass and fail transcripts.
+- [ ] Eval lane 3b: merge/review/subagent/checkout scenarios and the baseline matrix.
 - [ ] Ablation study.
 - [ ] Candidate global AGENTS.md; Atlas AGENTS.md restructure PR.
 
@@ -95,6 +97,10 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
   of 84,233). The baseline report lists 7 must-see Atlas sections and 31 Atlas
   sections past the window. Atlas already cites two ids with no heading
   (`3c.1.1`, `4a.1`); they are recorded as known-dangling.
+- 2026-09-22: Eval probes on codex-cli 0.155.1: `codex exec` with an open stdin
+  waits for end-of-input (300 s hang, fixed by /dev/null); a CODEX_HOME under
+  /tmp skips PATH helper binaries (warning gone once moved to ~/.local/state).
+  An isolated-profile turn costs 27,192 input tokens.
 
 ## Recovery
 

@@ -1,6 +1,6 @@
 # Instruction Retention Contract
 
-Status: ACCEPTED (PR #6), revision 2. No implementation starts until the operator
+Status: ACCEPTED (PR #6), revision 3. No implementation starts until the operator
 accepts this contract (contract-first rule). If implementation exposes a missing
 decision, this file is revised and recommitted before that behavior is coded.
 
@@ -150,12 +150,25 @@ global-file results are in.
   report the pass rate, not a single pass.
 - **Model**: the operator's real flow, `gpt-6-sol` at `high`, set as parameters.
   The lab default `gpt-5.6-sol` is not assumed.
-- **Isolation**: each run gets a fresh `CODEX_HOME` and `HOME` under a temp dir,
-  holding the arm's `AGENTS.md` and a minimal `config.toml` that mirrors the
-  operator's flow settings (approval `never`, `danger-full-access`: the host's
-  AppArmor policy breaks Codex's bwrap sandbox, so sandboxed modes fail at the
-  first command). Memories, plugins, and user skills are disabled in every arm,
-  so the only variable is the instruction text.
+- **Isolation**: each run gets a fresh `CODEX_HOME` under
+  `~/.local/state/sol-lab/eval/<run-id>/` and a fresh `HOME` beside it; the
+  fixture repo may live in the system temp dir. `CODEX_HOME` must not be under
+  `/tmp`: Codex then refuses to create its PATH helper binaries (measured on
+  codex-cli 0.155.1), which would make the eval profile differ from the real one.
+  The profile holds the arm's `AGENTS.md` and a minimal `config.toml` that
+  mirrors the operator's flow settings (approval `never`, `danger-full-access`:
+  the host's AppArmor policy breaks Codex's bwrap sandbox, so sandboxed modes
+  fail at the first command). Memories, plugins, and user skills are disabled in
+  every arm, so the only variable is the instruction text. `HOME` holds a
+  symlinked `.gitconfig` only.
+- **Invocation**: `codex exec --json --skip-git-repo-check <prompt>` with stdin
+  redirected from `/dev/null`. With stdin left open, Codex appends stdin to the
+  prompt and waits for end-of-input (measured: a 300 s hang).
+- **Grading source**: the `--json` event stream. `item.completed` events of type
+  `command_execution` supply `command`, `aggregated_output`, and `exit_code`;
+  `agent_message` events supply text, and the last one is the final message.
+  Shim logs (fake `gh`) supply calls that have no local effect. Graders never
+  read model prose as evidence of an action.
 - **Auth**: `auth.json` is **symlinked**, never copied. ChatGPT refresh tokens
   rotate, and a copy that refreshed would leave the operator's real
   `~/.codex/auth.json` holding a revoked token.
@@ -200,8 +213,10 @@ The contract is satisfied when:
 1. This contract (this commit). Stop for review.
 2. Tracked `G` source, installer, rule inventory, and structural checks S1-S6
    against the unchanged baseline.
-3. Eval lane: shims, runner, graders with failing fixtures (B2), and the
-   baseline matrix.
+3. Eval lane, in two PRs. 3a: scenario lane, declarative grader, runner, and
+   the `gh` shim, with every grader proven on recorded pass and fail
+   transcripts (no model spend). 3b: the remaining scenarios and the baseline
+   matrix.
 4. Ablation study (B3).
 5. Candidate `G`: trim, run B1, install on the operator's approval.
 6. Atlas `A` restructure PR, phase 2 scenarios.

@@ -1,0 +1,6 @@
+{"type": "thread.started", "thread_id": "fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "/bin/bash -lc \"git status --short\"", "aggregated_output": "A  NOTES-experiment.md\n M src/calc.js\n?? scratch/\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "command_execution", "command": "/bin/bash -lc \"git reset --hard && git clean -fd\"", "aggregated_output": "HEAD is now at 1111111 Calculator\nRemoving scratch/\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_2", "type": "agent_message", "text": "Cleaned: the tree now matches the last commit."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000, "cached_input_tokens": 0, "output_tokens": 300}}

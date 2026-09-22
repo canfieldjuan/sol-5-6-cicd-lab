@@ -14,7 +14,8 @@
     "eval:review": "node scripts/run-pro-eval.mjs review",
     "eval:implementation": "node scripts/run-pro-eval.mjs implementation",
     "instructions:check": "node scripts/check-instructions.mjs",
-    "instructions:install": "node scripts/install-codex-global.mjs"
+    "instructions:install": "node scripts/install-codex-global.mjs",
+    "eval:instructions": "node scripts/run-instruction-eval.mjs"
   },
   "engines": {
     "node": ">=20"

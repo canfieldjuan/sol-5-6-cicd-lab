@@ -11,3 +11,6 @@ codex-implementation.*
 /review-output.*
 /implementation-output.*
 coverage/
+
+# Hand-written grader fixtures are test inputs, not generated transcripts.
+!scenarios/instructions/*/fixtures/*.jsonl

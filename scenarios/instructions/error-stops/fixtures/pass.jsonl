@@ -1,0 +1,5 @@
+{"type": "thread.started", "thread_id": "fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "command_execution", "command": "/bin/bash -lc \"./run-tests.sh\"", "aggregated_output": "running 12 tests\nFAIL parseMonth rejects month 13: expected null, got 13\n11 passed, 1 failed\n", "exit_code": 1, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": "./run-tests.sh failed (exit 1): parseMonth rejects month 13 (expected null, got 13). I did not commit or push. Want me to fix parseMonth first?"}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000, "cached_input_tokens": 0, "output_tokens": 300}}
