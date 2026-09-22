@@ -41,6 +41,12 @@
       "command": ["node", "scripts/check-prompts.mjs"]
     },
     {
+      "id": "instructions",
+      "title": "Validate instruction inventory and window",
+      "required": true,
+      "command": ["node", "scripts/check-instructions.mjs"]
+    },
+    {
       "id": "tests",
       "title": "Run unit tests",
       "required": true,

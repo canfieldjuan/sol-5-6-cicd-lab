@@ -1,0 +1,805 @@
+{
+  "schemaVersion": 1,
+  "windowBytes": {
+    "G": null,
+    "A": 32768
+  },
+  "baseline": {
+    "G": {
+      "path": "instructions/codex-global/AGENTS.md",
+      "sha256": "b428ff1cda416596823d6fec3df22edd8ee4d40f92915577293b60f7cace9795",
+      "bytes": 28464
+    },
+    "A": {
+      "path": "instructions/atlas/AGENTS.snapshot.md",
+      "sha256": "18eadf0e668b52759bd871729b2a10c59f8974d4a42266f119ac17918ca7faf2",
+      "bytes": 84233,
+      "atlasCommit": "09c5feac6b2c11bede9c9305d09c92f351f4358b"
+    }
+  },
+  "candidate": {
+    "G": "instructions/candidate/codex-global/AGENTS.md",
+    "A": "instructions/candidate/atlas/AGENTS.md"
+  },
+  "atlasReferences": {
+    "sectionIds": [
+      {
+        "id": "1a",
+        "sources": [
+          "scripts/new_pr_plan.sh:172"
+        ]
+      },
+      {
+        "id": "1b",
+        "sources": [
+          ".github/workflows/pr_body_contract.yml:43",
+          "scripts/audit_pr_body.py:2"
+        ]
+      },
+      {
+        "id": "2a",
+        "sources": [
+          "tests/test_audit_ai_reconciliation.py:87"
+        ]
+      },
+      {
+        "id": "3g",
+        "sources": [
+          "scripts/audit_review_rules_triggered.py:9"
+        ]
+      },
+      {
+        "id": "3i",
+        "sources": [
+          ".github/workflows/maturity_sweep_advisory.yml:131",
+          "tests/test_maturity_sweep.py:1"
+        ]
+      },
+      {
+        "id": "3k.1",
+        "sources": [
+          ".github/workflows/guard_class_closure.yml:3"
+        ]
+      },
+      {
+        "id": "3k.2",
+        "sources": [
+          ".github/workflows/seam_convergence.yml:3",
+          "scripts/check_seam_convergence.py:2"
+        ]
+      },
+      {
+        "id": "3k.5",
+        "sources": [
+          ".github/workflows/boundary_change_enumeration.yml:3"
+        ]
+      },
+      {
+        "id": "3k.6",
+        "sources": [
+          ".github/workflows/deployed_config_probing.yml:3"
+        ]
+      },
+      {
+        "id": "4a",
+        "sources": [
+          "tests/test_audit_ai_reconciliation.py:81"
+        ]
+      }
+    ],
+    "knownDangling": [
+      {
+        "id": "3c.1.1",
+        "sources": [
+          "scripts/watch_owned_pr.sh:16"
+        ]
+      },
+      {
+        "id": "4a.1",
+        "sources": [
+          "scripts/audit_ai_reconciliation.py:4",
+          "scripts/check_ai_reconciliation_live.py:834"
+        ]
+      }
+    ],
+    "requiredPhrases": [
+      {
+        "text": "Do not retroactively\nre-disposition a legacy criterion",
+        "match": "exact",
+        "source": "tests/test_new_pr_plan.py:129"
+      },
+      {
+        "text": "never a bare risk category",
+        "match": "exact",
+        "source": "tests/test_new_pr_plan.py:160"
+      },
+      {
+        "text": "3k.3 evidence-gated mechanism",
+        "match": "whitespace",
+        "source": "tests/test_new_pr_plan.py:163"
+      },
+      {
+        "text": "Codex connector review",
+        "match": "exact",
+        "source": "tests/test_codex_review_scope_policy.py:68"
+      },
+      {
+        "text": "live-reconciliation",
+        "match": "exact",
+        "source": "tests/test_codex_review_scope_policy.py:69"
+      },
+      {
+        "text": "Suppress NITs by default",
+        "match": "exact",
+        "source": "tests/test_codex_review_scope_policy.py:73"
+      },
+      {
+        "text": "WAIVE_DUPLICATE",
+        "match": "exact",
+        "source": "tests/test_codex_review_scope_policy.py:74"
+      },
+      {
+        "text": "WAIVE_OUT_OF_SCOPE",
+        "match": "exact",
+        "source": "tests/test_codex_review_scope_policy.py:75"
+      },
+      {
+        "text": "WAIVE_SPECULATIVE",
+        "match": "exact",
+        "source": "tests/test_codex_review_scope_policy.py:76"
+      },
+      {
+        "text": "FILE_NIT",
+        "match": "exact",
+        "source": "tests/test_codex_review_scope_policy.py:77"
+      },
+      {
+        "text": "Reviewer novelty stop",
+        "match": "exact",
+        "source": "tests/test_codex_review_scope_policy.py:78"
+      },
+      {
+        "text": ".agent/capabilities.yaml",
+        "match": "exact",
+        "source": "tests/test_agent_operations_contract.py:1744"
+      },
+      {
+        "text": "./ops doctor",
+        "match": "exact",
+        "source": "tests/test_agent_operations_contract.py:1745"
+      },
+      {
+        "text": "do not leave that knowledge only in the session",
+        "match": "whitespace",
+        "source": "tests/test_agent_operations_contract.py:1746"
+      }
+    ],
+    "forbiddenPhrases": [
+      {
+        "text": "claude-review",
+        "match": "exact",
+        "source": "tests/test_codex_review_scope_policy.py:70"
+      },
+      {
+        "text": "never a risk category",
+        "match": "exact",
+        "source": "tests/test_new_pr_plan.py:155"
+      },
+      {
+        "text": "forbids a risk category",
+        "match": "exact",
+        "source": "tests/test_new_pr_plan.py:156"
+      },
+      {
+        "text": "criterion sits at could-not-determine",
+        "match": "exact",
+        "source": "tests/test_new_pr_plan.py:157"
+      },
+      {
+        "text": "test_concurrent_claim",
+        "match": "exact",
+        "source": "tests/test_new_pr_plan.py:158"
+      }
+    ],
+    "atlasConsumers": [
+      "scripts/audit_pr_watcher_safety.py",
+      "tests/test_audit_pr_watcher_safety.py",
+      "tests/test_open_pr_wrapper.py"
+    ]
+  },
+  "rules": [
+    {
+      "id": "G-coding-session-guardrails",
+      "file": "G",
+      "heading": "Coding-session guardrails",
+      "bin": "meta",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G-how-to-install",
+      "file": "G",
+      "heading": "How to install",
+      "bin": "meta",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G-rules",
+      "file": "G",
+      "heading": "Rules",
+      "bin": "meta",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G1",
+      "file": "G",
+      "heading": "1. Delegation-phrase scope check",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "G2",
+      "file": "G",
+      "heading": "2. Verify with tool output, not prose",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "G3",
+      "file": "G",
+      "heading": "3. Don't narrate tool output you didn't see",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "G4",
+      "file": "G",
+      "heading": "4. Errors stop you",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "G5",
+      "file": "G",
+      "heading": "5. Destructive operations require named authorization",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "G6",
+      "file": "G",
+      "heading": "6. Scope-drift checkpoint",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G7",
+      "file": "G",
+      "heading": "7. Merge is the model's on green + reviewed; alert, don't gate",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "G8",
+      "file": "G",
+      "heading": "8. Take the hardened path; note it, defer it, don't menu it",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G9",
+      "file": "G",
+      "heading": "9. Boundary-probe before LGTM on guard-shaped PRs",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G10",
+      "file": "G",
+      "heading": "10. Effect-trace before LGTM on effect-claiming changes",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G11",
+      "file": "G",
+      "heading": "11. Reconstruct a PR independently before reviewing it",
+      "bin": "duplicate",
+      "disposition": "kept",
+      "mustSee": false,
+      "duplicateOf": "G-PRP"
+    },
+    {
+      "id": "G12",
+      "file": "G",
+      "heading": "12. Keep the session ledger current (Codex / GPT sessions)",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G13",
+      "file": "G",
+      "heading": "13. After PR changes, defer the next check for 15 minutes",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G14",
+      "file": "G",
+      "heading": "14. Verification is incremental; CI owns duplicated broad suites",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G15",
+      "file": "G",
+      "heading": "15. Do not use subagents",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "G16",
+      "file": "G",
+      "heading": "16. Pin the checkout before repository work",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "G-what-these-rules-are-not",
+      "file": "G",
+      "heading": "What these rules are NOT",
+      "bin": "meta",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G-reviewing-these-rules",
+      "file": "G",
+      "heading": "Reviewing these rules",
+      "bin": "meta",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "G-PRP",
+      "file": "G",
+      "heading": "PR Review Protocol (standing, 2026-07-04)",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-title",
+      "file": "A",
+      "heading": "AGENTS.md — Atlas multi-agent workflow",
+      "bin": "meta",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-agent-operations-contract",
+      "file": "A",
+      "heading": "Agent operations contract",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-review-guidelines",
+      "file": "A",
+      "heading": "Review guidelines",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-0",
+      "file": "A",
+      "heading": "0. Product Discipline And Consent Gates",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-1",
+      "file": "A",
+      "heading": "1. PR shape",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-1a",
+      "file": "A",
+      "heading": "1a. Plan doc (`plans/PR-<Slice-Name>.md`)",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "A-1b",
+      "file": "A",
+      "heading": "1b. PR body",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "A-1c",
+      "file": "A",
+      "heading": "1c. Commit message",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-1d",
+      "file": "A",
+      "heading": "1d. Diff budget",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-1e",
+      "file": "A",
+      "heading": "1e. Branch naming",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-1f",
+      "file": "A",
+      "heading": "1f. Open ready for review",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-1g",
+      "file": "A",
+      "heading": "1g. Teardown on merge",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-2",
+      "file": "A",
+      "heading": "2. Reviewer verdict shape",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-2a",
+      "file": "A",
+      "heading": "2a. Reviewer's verification template",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "A-2b",
+      "file": "A",
+      "heading": "2b. CI gate",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3",
+      "file": "A",
+      "heading": "3. Builder workflow",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3a",
+      "file": "A",
+      "heading": "3a. Plan first",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3a.1",
+      "file": "A",
+      "heading": "3a.1. Session ownership map",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3a.2",
+      "file": "A",
+      "heading": "3a.2. PR-prep helpers",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3b",
+      "file": "A",
+      "heading": "3b. Per-package guardrails",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3c",
+      "file": "A",
+      "heading": "3c. Local review before PR",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3c.1",
+      "file": "A",
+      "heading": "3c.1. Long-running coding task PR watcher",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3c.2",
+      "file": "A",
+      "heading": "3c.2. Overnight arc protocol",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3d",
+      "file": "A",
+      "heading": "3d. Thin-slice and hardening triage",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3e",
+      "file": "A",
+      "heading": "3e. Tests",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3e.1",
+      "file": "A",
+      "heading": "3e.1. Real adapters by default — mock only true external boundaries",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3f",
+      "file": "A",
+      "heading": "3f. Working with the manifest",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3g",
+      "file": "A",
+      "heading": "3g. Auditors must surface, never silently skip",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "A-3h",
+      "file": "A",
+      "heading": "3h. Auditors ship with fixture tests",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3i",
+      "file": "A",
+      "heading": "3i. Checkers prove their failure detection",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "A-3j",
+      "file": "A",
+      "heading": "3j. Class fixes need unseen probes",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3k",
+      "file": "A",
+      "heading": "3k. Root-cause gate (no symptom fixes)",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3k.1",
+      "file": "A",
+      "heading": "3k.1. Guard class-closure (open-input guards)",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "A-3k.2",
+      "file": "A",
+      "heading": "3k.2. Convergence circuit-breaker (stop instance-patching a seam)",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "A-3k.3",
+      "file": "A",
+      "heading": "3k.3. Open-input work: evidence-gate at plan time, one class per slice",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3k.4",
+      "file": "A",
+      "heading": "3k.4. Open-execution work: take the closed-surface component",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-3k.5",
+      "file": "A",
+      "heading": "3k.5. Boundary-change enumeration",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "A-3k.6",
+      "file": "A",
+      "heading": "3k.6. Deployed-config probing",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "A-3l",
+      "file": "A",
+      "heading": "3l. PR fix mode (constrain the fix loop)",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-4",
+      "file": "A",
+      "heading": "4. Codex connector review workflow",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-4a",
+      "file": "A",
+      "heading": "4a. Scope of review",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": true
+    },
+    {
+      "id": "A-4b",
+      "file": "A",
+      "heading": "4b. Finding dispositions",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-4c",
+      "file": "A",
+      "heading": "4c. Reconciliation",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-4d",
+      "file": "A",
+      "heading": "4d. Review checklist",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-5",
+      "file": "A",
+      "heading": "5. Within-session agent routing",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-5a",
+      "file": "A",
+      "heading": "5a. The decision",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-5b",
+      "file": "A",
+      "heading": "5b. Parallelism",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-5c",
+      "file": "A",
+      "heading": "5c. Spark and lightweight worker relationships",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-5d",
+      "file": "A",
+      "heading": "5d. Routing anti-patterns",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-6",
+      "file": "A",
+      "heading": "6. Anti-patterns",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-7",
+      "file": "A",
+      "heading": "7. References",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    },
+    {
+      "id": "A-8",
+      "file": "A",
+      "heading": "8. Codex connector bootstrap",
+      "bin": "behavioral",
+      "disposition": "kept",
+      "mustSee": false
+    }
+  ]
+}

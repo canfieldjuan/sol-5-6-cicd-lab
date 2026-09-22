@@ -1,6 +1,6 @@
 # Instruction Retention Contract
 
-Status: DRAFT for operator review. No implementation starts until the operator
+Status: ACCEPTED (PR #6), revision 2. No implementation starts until the operator
 accepts this contract (contract-first rule). If implementation exposes a missing
 decision, this file is revised and recommitted before that behavior is coded.
 
@@ -86,10 +86,22 @@ Structural invariants (deterministic, required checks):
   The snapshot manifest records the Atlas SHA it was taken from.
 - **S5 Budget does not grow.** The candidate's injected bytes (`G` + `A` window)
   are at most the baseline's. The target, not a gate, is a 40% reduction.
-- **S6 Installer safety.** The installer refuses to overwrite `~/.codex/AGENTS.md`
-  when its hash matches neither the last installed version nor the baseline
-  (someone edited it by hand). Otherwise it writes a timestamped backup first,
-  and it never touches any other file in `~/.codex/`.
+- **S6 Installer safety.** The installer is dry-run unless `--apply` is passed.
+  It installs only when the target is missing, already matches the source (a
+  no-op), or matches the recorded baseline hash or the last hash it installed.
+  Any other target hash is a hand edit: it refuses, leaves the file untouched,
+  and says to fold the edit into the tracked source first. It offers no override
+  flag. The only file it writes under `~/.codex/` is `AGENTS.md`. Its state
+  (last installed hash), timestamped backups, lock, and temp file live under
+  `~/.local/state/sol-lab/`. The new file is renamed into place atomically, and
+  the target hash is re-checked immediately before the rename.
+
+Check modes (revision 2). S2, S3, and S5 describe the candidate. On the
+unchanged baseline they fail by construction, since the truncation they detect
+is the defect this contract fixes. So until candidate files exist under
+`instructions/candidate/`, the required check enforces S1, S4, and S6 and
+prints S2, S3, and S5 as a baseline report. Once candidate files exist, all six
+are enforced against the candidate.
 
 Behavioral invariants (eval lane, run on demand):
 
