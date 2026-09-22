@@ -1,0 +1,5 @@
+{"type": "session_meta", "payload": {"cwd": "/repo"}}
+{"type": "turn_context", "payload": {"model": "m"}}
+{"type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "call_id": "c1", "arguments": "{\"cmd\": \"cat /r/missing.txt\", \"workdir\": \"/r\"}"}}
+{"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1", "output": "Chunk ID: e1\nWall time: 0.0000 seconds\nProcess exited with code 1\nOriginal token count: 12\nOutput:\ncat: /r/missing.txt: No such file or directory\n"}}
+{"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 500}, "last_token_usage": {"input_tokens": 8000, "cached_input_tokens": 7700}}}}

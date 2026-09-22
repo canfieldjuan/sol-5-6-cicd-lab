@@ -15,7 +15,8 @@
     "eval:implementation": "node scripts/run-pro-eval.mjs implementation",
     "instructions:check": "node scripts/check-instructions.mjs",
     "instructions:install": "node scripts/install-codex-global.mjs",
-    "eval:instructions": "node scripts/run-instruction-eval.mjs"
+    "eval:instructions": "node scripts/run-instruction-eval.mjs",
+    "analyze:tool-failures": "node scripts/analyze-tool-failures.mjs"
   },
   "engines": {
     "node": ">=20"

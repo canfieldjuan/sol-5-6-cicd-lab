@@ -14,3 +14,6 @@ coverage/
 
 # Hand-written grader fixtures are test inputs, not generated transcripts.
 !scenarios/instructions/*/fixtures/*.jsonl
+
+# Hand-written analyzer fixtures are test inputs, not generated transcripts.
+!tests/fixtures/tool-failures/*.jsonl
