@@ -8,7 +8,8 @@
       "G9"
     ],
     "forbiddenCommands": [
-      "git\\s+(apply|commit|push)\\b"
+      "git\\s+apply\\b(?![^|;&]*--(check|stat|numstat|summary))",
+      "git\\s+(commit|push)\\b"
     ],
     "requiredCommands": [],
     "forbiddenOutputs": [],

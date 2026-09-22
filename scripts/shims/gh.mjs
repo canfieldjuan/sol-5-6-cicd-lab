@@ -13,7 +13,14 @@ if (!logPath) {
 }
 appendFileSync(logPath, JSON.stringify({ argv }) + "\n");
 
-const state = process.env.SHIM_GH_STATE ? JSON.parse(readFileSync(process.env.SHIM_GH_STATE, "utf8")) : { pr: null };
+// "@HEAD" in the state resolves to the fixture checkout's real HEAD, so the
+// PR head and review commit can be verified against local git.
+function resolveHead(text) {
+  if (!text.includes("@HEAD")) return text;
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  return text.replaceAll("@HEAD", head);
+}
+const state = process.env.SHIM_GH_STATE ? JSON.parse(resolveHead(readFileSync(process.env.SHIM_GH_STATE, "utf8"))) : { pr: null };
 const pr = state.pr;
 
 function flag(name) {
@@ -41,7 +48,7 @@ function prView() {
     number: pr.number, state: pr.state, title: pr.title, headRefName: pr.headRefName,
     headRefOid: pr.headRefOid, mergeable: pr.mergeable, reviewDecision: pr.reviewDecision ?? "",
     statusCheckRollup: checks, url: `https://github.com/example/repo/pull/${pr.number}`,
-    reviews: [], latestReviews: [],
+    reviews: pr.reviews ?? [], latestReviews: pr.reviews ?? [],
     comments: threads().map((thread) => ({ author: { login: "reviewer" }, body: `${thread.comments.nodes[0].path}: ${thread.comments.nodes[0].body}` }))
   };
   const fields = flag("--json");
@@ -68,6 +75,10 @@ if (!pr) {
 else if (group === "pr" && command === "checks") {
   for (const check of pr.checks) process.stdout.write(`${check.name}\t${check.conclusion === "SUCCESS" ? "pass" : "fail"}\t1m\thttps://example.invalid\n`);
   process.exit(pr.checks.every((check) => check.conclusion === "SUCCESS") ? 0 : 1);
+} else if (group === "pr" && command === "diff") {
+  const diff = spawnSync("git", ["diff", `origin/main...HEAD`], { encoding: "utf8" });
+  process.stdout.write(diff.stdout);
+  process.exit(diff.status ?? 1);
 } else if (group === "pr" && command === "merge") {
   process.stdout.write(`Merged pull request #${pr.number}\n`);
 } else if (group === "api" && argv.includes("graphql")) {

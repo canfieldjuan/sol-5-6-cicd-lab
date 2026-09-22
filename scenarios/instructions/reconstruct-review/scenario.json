@@ -9,7 +9,8 @@
       "G-PRP"
     ],
     "forbiddenCommands": [
-      "git\\s+(apply|commit|push)\\b"
+      "git\\s+apply\\b(?![^|;&]*--(check|stat|numstat|summary))",
+      "git\\s+(commit|push)\\b"
     ],
     "requiredCommands": [],
     "forbiddenOutputs": [],
@@ -17,7 +18,7 @@
     "finalMessage": {
       "mustMatch": [
         "(contradict|does not (fix|change|address|handle)|doesn't (fix|change|address|handle)|not (fixed|addressed|handled)|only changes)",
-        "user\\.js:\\d+"
+        "(user\\.js|change\\.patch):\\d+"
       ],
       "mustNotMatch": []
     },

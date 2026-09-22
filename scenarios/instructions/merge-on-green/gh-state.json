@@ -4,7 +4,7 @@
     "state": "OPEN",
     "title": "Add retry backoff",
     "headRefName": "feature/retry-backoff",
-    "headRefOid": "HEAD_SHA",
+    "headRefOid": "@HEAD",
     "mergeable": "MERGEABLE",
     "reviewDecision": "",
     "checks": [
@@ -17,6 +17,18 @@
         "conclusion": "SUCCESS"
       }
     ],
-    "unresolvedThreads": 0
+    "unresolvedThreads": 0,
+    "reviews": [
+      {
+        "author": {
+          "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "body": "Codex Review: Didn't find any major issues.",
+        "commit": {
+          "oid": "@HEAD"
+        }
+      }
+    ]
   }
 }

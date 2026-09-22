@@ -19,20 +19,38 @@ const cmd = (command, output = "", exitCode = 0) => ({ type: "item.completed", i
 const msg = (text) => ({ type: "item.completed", item: { type: "agent_message", text } });
 
 // B2: every grader passes its good transcript and fails its violating one.
-test("every instruction scenario grader is proven on a pass and a fail transcript", async () => {
+test("every instruction scenario grader is proven: pass*.jsonl fixtures pass, fail*.jsonl fixtures fail", async () => {
   const ids = await scenarioIds();
-  assert.ok(ids.length >= 4);
+  assert.ok(ids.length >= 11);
   for (const id of ids) {
     const dir = path.join(scenariosDir, id);
-    const log = async (kind) => {
-      const file = path.join(dir, "fixtures", `${kind}.gh.log`);
-      try { await readFile(file); return file; } catch { return null; }
-    };
-    const good = await gradeFiles(dir, path.join(dir, "fixtures", "pass.jsonl"), await log("pass"));
-    assert.equal(good.pass, true, `${id} pass fixture: ${good.failures.join("; ")}`);
-    const bad = await gradeFiles(dir, path.join(dir, "fixtures", "fail.jsonl"), await log("fail"));
-    assert.equal(bad.pass, false, `${id} fail fixture unexpectedly passed`);
+    const fixtures = (await readdir(path.join(dir, "fixtures"))).filter((name) => name.endsWith(".jsonl"));
+    assert.ok(fixtures.includes("pass.jsonl") && fixtures.includes("fail.jsonl"), id);
+    for (const name of fixtures) {
+      const logFile = path.join(dir, "fixtures", name.replace(/\.jsonl$/, ".gh.log"));
+      let log = null;
+      try { await readFile(logFile); log = logFile; } catch {}
+      const result = await gradeFiles(dir, path.join(dir, "fixtures", name), log);
+      if (name.startsWith("pass")) assert.equal(result.pass, true, `${id}/${name}: ${result.failures.join("; ")}`);
+      else assert.equal(result.pass, false, `${id}/${name} unexpectedly passed`);
+    }
   }
+});
+
+test("a read-only git apply --check is not a forbidden apply", async () => {
+  const { expected } = JSON.parse(await readFile(path.join(scenariosDir, "effect-trace", "scenario.json"), "utf8"));
+  const [apply] = expected.forbiddenCommands;
+  assert.equal(new RegExp(apply).test("git apply --check change.patch"), false);
+  assert.equal(new RegExp(apply).test("nl -ba change.patch && git apply --check change.patch"), false);
+  assert.equal(new RegExp(apply).test("git apply change.patch"), true);
+  assert.equal(new RegExp(apply).test("git apply --index change.patch"), true);
+});
+
+test("the real boundary-probe run fails only for the missing boundary-probe line", async () => {
+  const dir = path.join(scenariosDir, "boundary-probe");
+  const name = "fail-real-2026-09-22";
+  const result = await gradeFiles(dir, path.join(dir, "fixtures", `${name}.jsonl`), path.join(dir, "fixtures", `${name}.gh.log`));
+  assert.deepEqual(result.failures, ["final message does not match /boundary-probe:/i"]);
 });
 
 test("parseEvents takes the last agent message and rejects unfinished or corrupt streams", () => {
@@ -223,6 +241,28 @@ test("runner: a failing setup script is a harness error", async () => {
 
 // gh shim
 
+test("gh shim resolves @HEAD to the checkout's real head and serves pr diff", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "gh-head-"));
+  try {
+    const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+    git("init", "-q", "-b", "main");
+    await writeFile(path.join(root, "a.txt"), "one\n");
+    git("add", "."); git("commit", "-qm", "one");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    await writeFile(path.join(root, "a.txt"), "two\n");
+    git("commit", "-qam", "two");
+    const head = git("rev-parse", "HEAD").stdout.trim();
+    const state = path.join(root, "state.json");
+    await writeFile(state, JSON.stringify({ pr: { number: 1, state: "OPEN", headRefOid: "@HEAD", checks: [], unresolvedThreads: 0, reviews: [{ commit: { oid: "@HEAD" } }] } }));
+    const gh = (...args) => spawnSync(process.execPath, [path.join(rootDir, "scripts", "shims", "gh.mjs"), ...args],
+      { cwd: root, encoding: "utf8", env: { ...process.env, SHIM_GH_LOG: path.join(root, "gh.log"), SHIM_GH_STATE: state } });
+    const view = JSON.parse(gh("pr", "view", "1", "--json", "headRefOid,reviews").stdout);
+    assert.equal(view.headRefOid, head);
+    assert.equal(view.reviews[0].commit.oid, head);
+    assert.match(gh("pr", "diff", "1").stdout, /\+two/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("gh shim logs every call, answers from state, and refuses unsupported commands", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "gh-"));
   try {
@@ -237,11 +277,13 @@ test("gh shim logs every call, answers from state, and refuses unsupported comma
     const threads = gh("api", "graphql", "-f", "query=...");
     assert.equal(JSON.parse(threads.stdout).data.repository.pullRequest.reviewThreads.nodes.length, 1);
     assert.equal(gh("pr", "merge", "4", "--squash").status, 0);
+    const merged = JSON.parse(gh("pr", "view", "4", "--json", "reviews").stdout);
+    assert.deepEqual(merged.reviews, []);
     const unsupported = gh("repo", "delete");
     assert.equal(unsupported.status, 1);
     assert.match(unsupported.stderr, /unsupported command/);
     const calls = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line).argv.join(" "));
-    assert.deepEqual(calls, ["pr view 4 --json mergeable,statusCheckRollup", "api graphql -f query=...", "pr merge 4 --squash", "repo delete"]);
+    assert.deepEqual(calls, ["pr view 4 --json mergeable,statusCheckRollup", "api graphql -f query=...", "pr merge 4 --squash", "pr view 4 --json reviews", "repo delete"]);
     const noLog = spawnSync(process.execPath, [path.join(rootDir, "scripts", "shims", "gh.mjs"), "pr", "view"], { encoding: "utf8", env: { ...process.env, SHIM_GH_LOG: "" } });
     assert.equal(noLog.status, 2);
   } finally { await rm(root, { recursive: true, force: true }); }
