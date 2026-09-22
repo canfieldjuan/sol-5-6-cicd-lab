@@ -82,6 +82,20 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
   blocking surface.
 - Preserve exhaustive reconstruction as a separate deep-audit artifact.
 
+## Instruction retention (docs/INSTRUCTION_RETENTION_CONTRACT.md)
+
+- [x] Contract accepted (PR #6) and revised (check modes, installer state).
+- [x] Tracked global AGENTS.md, Atlas snapshot, rule inventory, structural checks
+  S1-S6, installer.
+- [ ] Eval lane: shims, runner, graders with failing fixtures, baseline matrix.
+- [ ] Ablation study.
+- [ ] Candidate global AGENTS.md; Atlas AGENTS.md restructure PR.
+
+- 2026-09-22: Baseline injects 61,232 bytes (G 28,464 in full + A's first 32,768
+  of 84,233). The baseline report lists 7 must-see Atlas sections and 31 Atlas
+  sections past the window. Atlas already cites two ids with no heading
+  (`3c.1.1`, `4a.1`); they are recorded as known-dangling.
+
 ## Recovery
 
 Run `git status`, `npm run check`, `npm run ci:advisory`, and actionlint. Compare the
