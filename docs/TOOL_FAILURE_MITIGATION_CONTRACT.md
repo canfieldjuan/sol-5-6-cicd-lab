@@ -1,0 +1,177 @@
+# Tool-Failure Mitigation Contract
+
+Status: DRAFT for operator review. No implementation starts until the operator
+accepts this contract. Steps 3-4 are specified at the invariant level only;
+their detailed specs are added as contract revisions after the step-2 probe
+has verified the hook behavior they depend on.
+
+Ground-truth rule: code, binaries, and raw session logs are evidence. Docs,
+comments, prior findings, and this contract's own "measured" numbers are claims
+until a check in this repo reproduces them.
+
+## 1. Problem
+
+Codex sessions on the operator's machine (Jul-Sep 2026, 803 rollouts, about
+300k tool calls, codex-cli 0.155.1) repeat the same mechanical failures. Each
+failure costs at least one extra model step. The operator has been adding
+AGENTS.md prose to prevent them, which costs tokens on every turn and only works
+when the model remembers it. Deterministic mechanisms (hooks, helper commands,
+config) should replace prose where they can.
+
+Measured so far (to be reproduced by the step-1 analyzer before any number is
+relied on):
+
+| Class | Evidence | Note |
+|---|---|---|
+| Stale `apply_patch` ("Failed to find expected lines") | Sol 579, Daybreak 373, Terra 315 output records | 96% (1,085/1,134) recover on the first retry: frequent, cheap |
+| Nonexistent `workdir` ("Failed to create unified exec process") | 70 records | Typos, directories the same command creates, malformed paths |
+| Atlas-only `scripts/open_pr.sh` run in another repo | 34 records, 6 repos | Always from an Atlas-cwd session |
+| Sandbox failure reported as a missing file (`bwrap: loopback: Failed RTM_NEWADDR`) | about 89 records | The host's AppArmor policy breaks bwrap |
+| Bare `psql` (Unix socket, OS user) | Peer-auth / missing-role errors | Atlas DB is TCP `localhost:5433`, user `atlas` (`Atlas/atlas_brain/storage/config.py:16-87`) |
+| `gh` guessing (unknown `--json` fields, malformed GraphQL) | Sampled | Known-good queries exist in `Atlas/scripts/check_ai_reconciliation_live.py:59-113` |
+
+Corrected earlier claims: output truncation does not waste tokens (the model
+receives about 10k tokens of each truncated output; it saves tokens), and about
+96-98% of each step's input is cached, so a failure costs about one step's
+uncached tokens, not the full context.
+
+## 2. Scope
+
+In scope, all in this lab (tracked sources plus installers, the pattern of
+`scripts/install-codex-global.mjs`):
+1. A tested failure analyzer.
+2. A live hook probe.
+3. Codex-only PreToolUse guards, a PR-status helper, and a scope guard.
+4. Codex ports of the dormant Stop hooks `evidence-gate.sh` and `round-guard.sh`.
+5. Before/after measurement and the list of AGENTS.md rules the mechanisms make
+   removable (feeds `instructions/rule-inventory.json`).
+
+Out of scope: changes to Codex itself; the shared `~/.claude/hooks/git_guard.py`
+(it also guards Claude Code and must not change behavior for Claude); Atlas
+product code.
+
+## 3. Definitions
+
+- **Tool output record**: a `response_item` of type `function_call_output` or
+  `custom_tool_call_output`, joined to its call by `call_id`. This includes the
+  direct `apply_patch` tool, whose output is plain text.
+- **Failure**: a tool output record with a nonzero `exit_code` chunk, a
+  `Script failed` / `Script error:` wrapper result, or an
+  `apply_patch verification failed` message. `rg`/`grep`/`diff`/`test` exit 1
+  with no error text is "no match", not a failure.
+- **Failing text**: only the failing command's own output chunk, or the text
+  after `Script error:`. It never includes file contents printed by a
+  successful command in the same call.
+- **Class**: exactly one of the classes in section 4 (A2), first match wins.
+  Classes are either *mechanical* (tool misuse; the targets of this contract) or
+  *expected* (a test or build that legitimately fails during development).
+- **Step cost**: the uncached input tokens of the model step that follows the
+  failure (`last_token_usage.input_tokens - cached_input_tokens` of the next
+  distinct `token_count` event). Cached tokens are reported separately and
+  never summed into cost. A `token_count` event that repeats the previous totals
+  is not a new step.
+- **Recovered**: the next call against the same target (file for patches,
+  command for exec) succeeds within 5 calls. **Repeated**: it fails again.
+
+## 4. Invariants
+
+### Analyzer (step 1)
+
+- **A1 Coverage.** Every tool output record in the window is read. Direct
+  `apply_patch` outputs are included. A record whose call is missing is counted
+  as `orphan`, not dropped.
+- **A2 Classification.** Classes, first match on failing text wins:
+  `sandbox` (bwrap / RTM_NEWADDR / "fs sandbox helper") | `bad-workdir`
+  ("Failed to create unified exec process") | `patch-stale` ("Failed to find
+  expected lines" / "Failed to find context") | `patch-malformed` (invalid hunk,
+  multiple operations, empty hunk) | `wrong-repo-script` (`scripts/X: No such
+  file` where X exists in another known repo) | `path-missing` | `permission` |
+  `db-auth` (peer/password auth, missing role) | `db-sql` | `gh-usage` (unknown
+  JSON field, GraphQL error) | `js-wrapper` (error located in `exec_main.mjs`) |
+  `shell-quoting` | `command-missing` | `network` | `timeout` | `stdin-dead`
+  ("Unknown process id") | `interactive-only` | `expected-test` |
+  `other`. A Python `SyntaxError` is never `js-wrapper`.
+- **A3 Cost.** Cost is the step cost (section 3). The report shows count, share
+  of calls, uncached cost, and recovered/repeated per class, per model.
+- **A4 Determinism.** Same input files produce byte-identical JSON output.
+- **A5 Window.** An explicit `--since/--until` (or file glob) is required and is
+  echoed in the output. There is no silent default window.
+
+### Guards and hooks (steps 2-4)
+
+- **H1 Block and redirect, never end the turn.** A PreToolUse guard uses
+  `permissionDecision:"deny"`, which refuses only that call. A Stop guard uses
+  `decision:"block"`, which continues the turn with the reason as the next
+  prompt. No guard uses `continue:false` or anything else that stops the session.
+- **H2 Actionable reason.** Every reason names the correct next action: the
+  existing path, the right command, the helper to use, or the declared scope. A
+  reason that only names the violation fails review.
+- **H3 No false blocks by construction.** A deny is allowed only when the call
+  would certainly fail anyway (a nonexistent workdir or script), or when it
+  violates an explicitly declared scope. Everything else gets context
+  injection at most.
+- **H4 Fail open on guard error.** If a guard itself errors (bad input, a parse
+  failure, a missing dependency), it allows the call and logs to its state dir.
+  A broken guard must never stall work.
+- **H5 Scope is opt-in.** The scope guard is inactive unless a scope file exists
+  (draft shape: `.codex/scope.json` with repo roots, allowed path globs, PR
+  number, goal line). When it is active, writes outside the globs and commands
+  in another repo are denied with a redirect naming the scope.
+- **H6 Claude isolation.** Codex guards are separate modules. Nothing changes
+  the behavior of hooks Claude Code runs.
+- **H7 Trust.** Installers never hand-write `[hooks.state]` trust hashes. Step 2
+  determines Codex's own trust flow, and installers use it.
+
+## 5. Step 2 probe: what must be proven
+
+The probe runs in an isolated CODEX_HOME (the `runOne` isolation in
+`scripts/run-instruction-eval.mjs`) with throwaway hooks, and records a
+transcript for each of these:
+
+1. Whether `apply_patch` reaches PreToolUse/PostToolUse, and under which
+   `tool_name` and `tool_input` shape.
+2. A PreToolUse deny: the turn keeps running and the model's next action
+   follows the reason.
+3. A Stop block: the turn continues with the reason as the prompt, and ends
+   normally after the model acts.
+4. Whether PostToolUse `additionalContext` reaches the model.
+5. Whether `updatedInput` with `permissionDecision:"allow"` rewrites a call.
+6. The trust flow for a new hook file.
+
+Every result becomes a revision of this contract, with a claim and its evidence,
+before step 3 designs on it.
+
+## 6. Failure cases
+
+- Malformed rollout lines (control characters) are parsed leniently and
+  counted as `unparsed`, never silently skipped.
+- A missing or changed Codex hook schema (a new codex-cli version) makes the
+  probe fail loudly. Guards pin the probed codex-cli version and warn on a
+  mismatch.
+- A guard timeout counts as a guard error (H4).
+
+## 7. Settling evidence
+
+- **Step 1**: `npm run check` passes. Every class in A2 has a fixture
+  that must classify correctly. Each audited misclassification (sandbox as
+  path, Python as JS, a missed direct apply_patch) has a regression fixture
+  shown to fail on the scratch analyzer. A report is produced for the Jul-Sep
+  window.
+- **Step 2**: six probe transcripts, and the contract revised.
+- **Step 3**: each guard is proven on a failing input and on a passing near-miss,
+  and each regression test fails on the pre-fix code. An eval scenario per
+  mitigated class passes before and after install.
+- **Step 4**: each ported Stop hook blocks a real Codex transcript that should
+  block and passes one that should not.
+- **Step 5**: an analyzer delta per class on sessions after install, and
+  AGENTS.md rules listed as relocation/removal candidates.
+
+## 8. Delivery order
+
+1. This contract. Stop for review.
+2. Analyzer (step 1). Its ranking orders step 3.
+3. Hook probe (step 2), then a contract revision.
+4. Guards, helper, and scope guard (step 3), one PR per mechanism, in ranked
+   order.
+5. Stop-hook ports (step 4).
+6. Measurement and AGENTS.md trim candidates (step 5).
