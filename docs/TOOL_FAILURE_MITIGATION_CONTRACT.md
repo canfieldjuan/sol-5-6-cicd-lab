@@ -1,7 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: DRAFT for operator review. No implementation starts until the operator
-accepts this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 2. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -55,7 +54,9 @@ product code.
 - **Tool output record**: a `response_item` of type `function_call_output` or
   `custom_tool_call_output`, joined to its call by `call_id`. This includes the
   direct `apply_patch` tool, whose output is plain text.
-- **Failure**: a tool output record with a nonzero `exit_code` chunk, a
+- **Failure**: a tool output record with a nonzero exit status in any of the
+  observed shapes (a JSON `exit_code` chunk, `Process exited with code N`,
+  `Exit code: N`), a
   `Script failed` / `Script error:` wrapper result, or an
   `apply_patch verification failed` message. `rg`/`grep`/`diff`/`test` exit 1
   with no error text is "no match", not a failure.
@@ -87,7 +88,10 @@ product code.
   multiple operations, empty hunk) | `wrong-repo-script` (`scripts/X: No such
   file` where X exists in another known repo) | `path-missing` | `permission` |
   `db-auth` (peer/password auth, missing role) | `db-sql` | `gh-usage` (unknown
-  JSON field, GraphQL error) | `js-wrapper` (error located in `exec_main.mjs`) |
+  JSON field, GraphQL error) | `js-wrapper` (raised by the code-mode wrapper
+  itself: a stack frame in `exec_main.mjs`, or a JavaScript error name reported
+  after `Script error:` with no Python traceback marker; a JS parse error has no
+  stack frame) |
   `shell-quoting` | `command-missing` | `network` | `timeout` | `stdin-dead`
   ("Unknown process id") | `interactive-only` | `expected-test` |
   `other`. A Python `SyntaxError` is never `js-wrapper`.
