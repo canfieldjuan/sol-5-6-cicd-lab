@@ -19,10 +19,10 @@ function miniInventory(rules, windowA = 40) {
 }
 const rule = (id, file, extra = {}) => ({ id, file, heading: id, bin: "behavioral", disposition: "kept", mustSee: false, ...extra });
 
-test("the checked-in inventory passes against the baseline", async () => {
+test("the checked-in inventory and candidate pass the enforced checks", async () => {
   const { errors, report } = await runChecks();
   assert.deepEqual(errors, []);
-  assert.ok(report.some((line) => line.startsWith("baseline injects 61232 bytes")));
+  assert.ok(report.some((line) => /^candidate injects \d+ bytes \(baseline 61232\); candidate files: G$/.test(line)));
 });
 
 test("the baseline report names the known truncation defect", async () => {
@@ -174,23 +174,44 @@ test("a baseline hash mismatch stops the checks", async () => {
   }
 });
 
-test("a lone candidate file is rejected", async () => {
+async function candidateRoot(candidateG) {
   const root = await mkdtemp(path.join(os.tmpdir(), "instr-"));
-  try {
-    const inventory = await loadInventory();
-    for (const file of ["G", "A"]) {
-      const target = path.join(root, inventory.baseline[file].path);
-      await mkdir(path.dirname(target), { recursive: true });
-      await writeFile(target, await readFile(path.join(rootDir, inventory.baseline[file].path)));
-    }
-    await writeFile(path.join(root, "instructions", "rule-inventory.json"), JSON.stringify(inventory));
-    await mkdir(path.join(root, path.dirname(inventory.candidate.G)), { recursive: true });
-    await writeFile(path.join(root, inventory.candidate.G), "# only G\n");
-    const { errors } = await runChecks(root);
-    assert.match(errors.join("\n"), /candidate files must be added together/);
-  } finally {
-    await rm(root, { recursive: true, force: true });
+  // Baseline-style inventory: every rule kept, so only the mode logic is under test.
+  const inventory = await loadInventory();
+  for (const item of inventory.rules) { item.disposition = "kept"; delete item.mergedInto; delete item.relocatedTo; }
+  for (const file of ["G", "A"]) {
+    const target = path.join(root, inventory.baseline[file].path);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, await readFile(path.join(rootDir, inventory.baseline[file].path)));
   }
+  await writeFile(path.join(root, "instructions", "rule-inventory.json"), JSON.stringify(inventory));
+  await mkdir(path.join(root, path.dirname(inventory.candidate.G)), { recursive: true });
+  await writeFile(path.join(root, inventory.candidate.G), candidateG);
+  return { root, inventory };
+}
+
+test("revision 4: a G-only candidate is enforced on G while A stays in baseline-report mode", async () => {
+  const baselineG = await readFile(path.join(rootDir, "instructions", "codex-global", "AGENTS.md"));
+  const same = await candidateRoot(baselineG);
+  try {
+    const { errors, report } = await runChecks(same.root);
+    assert.deepEqual(errors, [], "the unchanged G as a candidate passes, and A's truncation is not enforced");
+    assert.ok(report.some((line) => line.includes("candidate files: G")));
+    assert.ok(report.some((line) => line.startsWith("baseline report: S3: A-3l is past")), "A is still reported");
+  } finally { await rm(same.root, { recursive: true, force: true }); }
+
+  const bad = await candidateRoot("# only a title\n");
+  try {
+    const { errors } = await runChecks(bad.root);
+    assert.match(errors.join("\n"), /S1: kept rule G1 is missing from candidate G/, "G's dispositions are enforced");
+    assert.doesNotMatch(errors.join("\n"), /A-3l|candidate A/, "A's dispositions are not checked without an A candidate");
+  } finally { await rm(bad.root, { recursive: true, force: true }); }
+
+  const bigger = await candidateRoot(Buffer.concat([baselineG, Buffer.from("\nmore text\n")]));
+  try {
+    const { errors } = await runChecks(bigger.root);
+    assert.match(errors.join("\n"), /S5: candidate injects \d+ bytes, more than the baseline/, "budget counts baseline A plus candidate G");
+  } finally { await rm(bigger.root, { recursive: true, force: true }); }
 });
 
 // S6: installer

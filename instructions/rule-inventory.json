@@ -221,8 +221,12 @@
       "file": "G",
       "heading": "How to install",
       "bin": "meta",
-      "disposition": "kept",
-      "mustSee": false
+      "disposition": "relocated",
+      "mustSee": false,
+      "relocatedTo": {
+        "path": "instructions/codex-global/RATIONALE.md",
+        "pointer": "RATIONALE.md"
+      }
     },
     {
       "id": "G-rules",
@@ -253,8 +257,9 @@
       "file": "G",
       "heading": "3. Don't narrate tool output you didn't see",
       "bin": "behavioral",
-      "disposition": "kept",
-      "mustSee": true
+      "disposition": "merged",
+      "mustSee": true,
+      "mergedInto": "G2"
     },
     {
       "id": "G4",
@@ -317,9 +322,10 @@
       "file": "G",
       "heading": "11. Reconstruct a PR independently before reviewing it",
       "bin": "duplicate",
-      "disposition": "kept",
+      "disposition": "merged",
       "mustSee": false,
-      "duplicateOf": "G-PRP"
+      "duplicateOf": "G-PRP",
+      "mergedInto": "G-PRP"
     },
     {
       "id": "G12",
@@ -366,16 +372,24 @@
       "file": "G",
       "heading": "What these rules are NOT",
       "bin": "meta",
-      "disposition": "kept",
-      "mustSee": false
+      "disposition": "relocated",
+      "mustSee": false,
+      "relocatedTo": {
+        "path": "instructions/codex-global/RATIONALE.md",
+        "pointer": "RATIONALE.md"
+      }
     },
     {
       "id": "G-reviewing-these-rules",
       "file": "G",
       "heading": "Reviewing these rules",
       "bin": "meta",
-      "disposition": "kept",
-      "mustSee": false
+      "disposition": "relocated",
+      "mustSee": false,
+      "relocatedTo": {
+        "path": "instructions/codex-global/RATIONALE.md",
+        "pointer": "RATIONALE.md"
+      }
     },
     {
       "id": "G-PRP",
@@ -388,7 +402,7 @@
     {
       "id": "A-title",
       "file": "A",
-      "heading": "AGENTS.md — Atlas multi-agent workflow",
+      "heading": "AGENTS.md \u2014 Atlas multi-agent workflow",
       "bin": "meta",
       "disposition": "kept",
       "mustSee": false
@@ -588,7 +602,7 @@
     {
       "id": "A-3e.1",
       "file": "A",
-      "heading": "3e.1. Real adapters by default — mock only true external boundaries",
+      "heading": "3e.1. Real adapters by default \u2014 mock only true external boundaries",
       "bin": "behavioral",
       "disposition": "kept",
       "mustSee": false
