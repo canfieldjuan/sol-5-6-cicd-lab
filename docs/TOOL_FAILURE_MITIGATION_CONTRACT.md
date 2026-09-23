@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 16; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-16. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 17; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-17. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -482,6 +482,24 @@ The eval runner now keeps each guarded run's rollout and the guard's
 `errors.log` as artifacts. A failed run whose required guard never fired now
 says so first ("required guard denial absent"), where before the other
 failures hid it.
+
+### Claude originals brought to parity (revision 17)
+
+On 2026-09-23 the Claude `round-guard.sh` fired "14 pushes to
+`<current-branch>`" on a Claude session that had pushed 17 different branches
+once each. The cause was the revision 15-16 defects. At the operator's
+direction, both Claude originals (`~/.claude/hooks/`, and their byte-identical
+dormant copies in `~/.codex/hooks/`) received the same fixes:
+- the evidence gate treats `#N passed` as an identifier;
+- the round guard counts only a command-position `git [-C dir] push` outside
+  quoted text and heredoc bodies, and keys `HEAD` and bare pushes by `-C`,
+  then a leading `cd`, then the transcript row's `cwd`.
+
+Heredoc bodies were a case the Codex port did not need yet: Claude writes
+setup scripts with `cat > f <<'EOF'`. H6 still holds for the lab guards, which
+never modify Claude hooks. This change was an operator-directed edit made
+outside the lab. The parity test now expects the two sides to agree on every
+case.
 
 ### Behavior change for the operator
 
