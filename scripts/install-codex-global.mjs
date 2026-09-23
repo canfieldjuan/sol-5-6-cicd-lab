@@ -4,16 +4,19 @@ import path from "node:path";
 import { fail, isMain, readJson, rootDir } from "./lib.mjs";
 import { sha256 } from "./check-instructions.mjs";
 
-// Installs the tracked global AGENTS.md into the Codex home (contract S6).
+// Installs the tracked global AGENTS.md, or with --candidate the candidate,
+// into the Codex home (contract S6, revision 6).
 // AGENTS.md is the only file written under the Codex home; state, backups,
 // the lock, and the temp file live in the state directory.
 
-export function defaultPaths(env = process.env) {
+// Revision 6: `candidatePath` (the inventory's candidate.G) replaces the
+// baseline source when installing the candidate; every S6 rule is unchanged.
+export function defaultPaths(env = process.env, { candidatePath = null } = {}) {
   const home = os.homedir();
   const codexHome = env.CODEX_HOME || path.join(home, ".codex");
   const stateHome = env.XDG_STATE_HOME || path.join(home, ".local", "state");
   return {
-    source: path.join(rootDir, "instructions", "codex-global", "AGENTS.md"),
+    source: candidatePath ? path.join(rootDir, candidatePath) : path.join(rootDir, "instructions", "codex-global", "AGENTS.md"),
     target: path.join(codexHome, "AGENTS.md"),
     stateDir: path.join(stateHome, "sol-lab")
   };
@@ -90,7 +93,8 @@ export async function install({ source, target, stateDir, baselineHash, apply = 
 async function main() {
   const apply = process.argv.includes("--apply");
   const inventory = await readJson(path.join(rootDir, "instructions", "rule-inventory.json"));
-  const paths = defaultPaths();
+  const paths = defaultPaths(process.env, { candidatePath: process.argv.includes("--candidate") ? inventory.candidate.G : null });
+  console.log(`installing ${path.relative(rootDir, paths.source)}`);
   const result = await install({ ...paths, baselineHash: inventory.baseline.G.sha256, apply });
   console.log(`${result.action}: ${result.reason}`);
   console.log(`source ${result.sourceHash}\ntarget ${result.targetHash ?? "(missing)"} at ${paths.target}`);
