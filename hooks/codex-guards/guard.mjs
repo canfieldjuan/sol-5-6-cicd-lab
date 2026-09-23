@@ -9,12 +9,14 @@ import { answeredReadPath, checkReadFailure, checkReadPath, satisfiesReadPath } 
 import { answeredWrongRepoScript, checkWrongRepoFailure, checkWrongRepoScript, satisfiesWrongRepoScript } from "./guards/wrong-repo-script.mjs";
 import { checkPsql } from "./guards/psql.mjs";
 import { checkGhFields, satisfiesGhFields } from "./guards/gh-fields.mjs";
+import { checkRediscoveryBefore } from "./guards/rediscovery.mjs";
 
 export const GUARDS = [
   { code: "read-path", check: checkReadPath, after: checkReadFailure, satisfied: satisfiesReadPath, answered: answeredReadPath },
   { code: "wrong-repo-script", check: checkWrongRepoScript, after: checkWrongRepoFailure, satisfied: satisfiesWrongRepoScript, answered: answeredWrongRepoScript },
   { code: "psql", check: checkPsql },
-  { code: "gh-fields", check: checkGhFields, satisfied: satisfiesGhFields }
+  { code: "gh-fields", check: checkGhFields, satisfied: satisfiesGhFields },
+  { code: "rediscovery", check: checkRediscoveryBefore }
 ];
 
 export function stateDir(env = process.env) {
@@ -48,6 +50,10 @@ export function decide(input, state, { home = os.homedir(), guards = GUARDS, con
     for (const guard of guards) {
       const finding = guard.check({ toolName: input.tool_name, command, home, cwd: input.cwd, config });
       if (!finding) continue;
+      if (finding.action === "context") {
+        // Context-only PreToolUse output (Q10): the call runs, the hint reaches the model.
+        return { output: { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: finding.reason } }, state: { pending: remaining }, redirected: guard.code, redirectKind: finding.kind ?? "context" };
+      }
       if (finding.action === "rewrite") {
         return { output: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, command: finding.command } } }, state: { pending: remaining }, rewritten: guard.code };
       }
@@ -65,11 +71,13 @@ export function decide(input, state, { home = os.homedir(), guards = GUARDS, con
     for (const guard of guards) {
       const finding = guard.after?.({ toolName: input.tool_name, command, response: input.tool_response, cwd: input.cwd, home, config });
       if (!finding) continue;
-      const duplicate = pending.some((item) => item.code === finding.code && JSON.stringify(item.dir ?? item.script) === JSON.stringify(finding.pending.dir ?? finding.pending.script));
+      // Context-only findings (guard 5) record no pending redirect.
+      const duplicate = !finding.pending || pending.some((item) => item.code === finding.code && JSON.stringify(item.dir ?? item.script) === JSON.stringify(finding.pending.dir ?? finding.pending.script));
       return {
         output: { hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: finding.reason } },
         state: { pending: duplicate ? pending : [...pending, { ...finding.pending, reason: finding.reason }] },
-        redirected: guard.code
+        redirected: guard.code,
+        redirectKind: finding.kind ?? "after-failure"
       };
     }
     return { output: null, state: { pending } };
@@ -100,10 +108,10 @@ export function run(rawInput, env = process.env) {
   const file = sessionFile(dir, input.session_id);
   // Per-machine guard config (contract revision 8); absent config = those guards do nothing.
   const config = readJson(path.join(dir, "config.json"), {});
-  const { output, state, denied, redirected, rewritten } = decide(input, readJson(file, { pending: [] }), { home: env.HOME || os.homedir(), config });
+  const { output, state, denied, redirected, redirectKind, rewritten } = decide(input, readJson(file, { pending: [] }), { home: env.HOME || os.homedir(), config });
   writeJsonAtomic(file, state);
   if (denied || redirected || rewritten) {
-    const kind = denied ? "deny" : redirected ? "after-failure" : "rewrite";
+    const kind = denied ? "deny" : redirected ? redirectKind : "rewrite";
     appendFileSync(path.join(dir, "denials.jsonl"), JSON.stringify({ at: new Date().toISOString(), session: input.session_id ?? null, code: denied ?? redirected ?? rewritten, kind }) + "\n");
   }
   return output;

@@ -27,6 +27,8 @@ export const RUNS = {
   trust: { bypassTrust: false, prompt: "Run the shell command `echo PROBE_TRUST` and report its output." },
   // Q7/Q8: can a hook see a command's working directory, and does it fire when that directory is missing?
   workdir: { bypassTrust: true, setup: ["sub"], prompt: "Run `pwd` with the shell tool's working-directory parameter set to the `sub` directory (do not use cd). Report the output." },
+  // Q10: does a context-only PreToolUse output reach the model, and does the call still run?
+  precontext: { bypassTrust: true, prompt: "Run `echo PROBE_PRECTX` and report its output." },
   // Q9: does PostToolUse fire for a command that runs and exits nonzero, with its error text?
   postfail: { bypassTrust: true, prompt: "Run `cat no-such-file.txt` and report exactly what happened." },
   badwd: { bypassTrust: true, prompt: "Run `ls` with the shell tool's working-directory parameter set to `no-such-dir` (do not create it and do not use cd). Report exactly what happened." }
@@ -116,7 +118,7 @@ async function eventStreamErrorText(stdout) {
 const has = (events, pattern) => events?.commands.some((item) => pattern.test(item.command) || pattern.test(item.output));
 
 // Evaluates the six contract questions from the three runs.
-export function evaluate({ main, deny, rewrite, trust, workdir, badwd, postfail }) {
+export function evaluate({ main, deny, rewrite, trust, workdir, badwd, postfail, precontext }) {
   const q = [];
   const patchHooks = main.hookEvents.filter((e) => /notes\.txt|Add File/.test(JSON.stringify(e.tool_input ?? {})));
   q.push({ id: "Q1 apply_patch reaches hooks", verdict: patchHooks.length ? "observed" : "not observed",
@@ -157,6 +159,13 @@ export function evaluate({ main, deny, rewrite, trust, workdir, badwd, postfail 
     const pre = badwd.hookEvents.filter((e) => e.hook_event_name === "PreToolUse" && /\bls\b/.test(JSON.stringify(e.tool_input ?? {})));
     q.push({ id: "Q8 PreToolUse fires for a missing working directory", verdict: pre.length ? "fires" : "does not fire",
       detail: `${pre.map((e) => `cwd=${e.cwd} tool_input=${JSON.stringify(e.tool_input)}`).join(" | ").slice(0, 300)}; rollout CreateProcess error=${/Failed to create unified exec process/.test(badwd.rollout ?? "")}` });
+  }
+  if (precontext) {
+    const ran = has(precontext.events, /PROBE_PRECTX/);
+    const delivered = (precontext.developerMessages ?? []).some((m) => /QUINCE/.test(m));
+    const used = (precontext.agentMessages ?? []).some((m) => /QUINCE/i.test(m));
+    q.push({ id: "Q10 context-only PreToolUse: call runs and the context reaches the model", verdict: ran && delivered && used ? "yes" : ran && !delivered ? "call runs, context not delivered" : "no",
+      detail: `call ran=${ran}, delivered as developer message=${delivered}, used=${used}; stderr hook lines: ${precontext.stderr.split("\n").filter((l) => /hook/i.test(l)).join(" | ").slice(0, 200) || "(none)"}` });
   }
   if (postfail) {
     const post = postfail.hookEvents.filter((e) => e.hook_event_name === "PostToolUse" && /no-such-file/.test(JSON.stringify(e.tool_input ?? {})));
