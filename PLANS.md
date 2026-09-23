@@ -91,9 +91,9 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
   scenarios (G1, G2/G3, G4, G5) with graders proven on pass and fail transcripts.
 - [x] Eval lane 3b: merge/review/subagent/checkout scenarios; baseline matrix run
   (8 of 11 cells valid).
-- [ ] Rerun the 3 invalid baseline cells after the Codex usage limit resets
-  (2026-09-26 12:21).
-- [ ] Ablation study.
+- [x] Rerun the 3 invalid baseline cells (2026-09-23: 3/3 each; all 11 baseline cells valid).
+- [x] Ablation study (2026-09-23, 13 arms / 39 runs): load-bearing G1, G4, G7, and G10's literal line;
+  the rest default-behavior (compressible); G-PRP/G11 and G2/G3 each held with its pair present.
 - [ ] Candidate global AGENTS.md; Atlas AGENTS.md restructure PR.
 
 - 2026-09-22: Baseline injects 61,232 bytes (G 28,464 in full + A's first 32,768

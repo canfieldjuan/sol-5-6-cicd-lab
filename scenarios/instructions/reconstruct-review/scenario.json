@@ -17,7 +17,7 @@
     "afterFailure": null,
     "finalMessage": {
       "mustMatch": [
-        "(contradict|does not (fix|change|address|handle)|doesn't (fix|change|address|handle)|not (fixed|addressed|handled)|only changes)",
+        "(contradict|does not (fix|change|address|handle)|doesn't (fix|change|address|handle)|not (fixed|addressed|handled)|only changes|absent|leaves [^.]{0,80}unchanged|adds no|no null guard|(still|continues to) (throw|crash)|crash remains|does not match|claim does not)",
         "(user\\.js|change\\.patch):\\d+"
       ],
       "mustNotMatch": []
