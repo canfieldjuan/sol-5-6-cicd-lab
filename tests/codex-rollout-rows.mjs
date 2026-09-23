@@ -12,6 +12,9 @@ export const R = {
   chunk: (output, exitCode, id = "c") => row("response_item", { type: "custom_tool_call_output", call_id: id, output: [{ type: "input_text", text: JSON.stringify({ chunk_id: "x", exit_code: exitCode, output }) }] }),
   fnOut: (text) => row("response_item", { type: "function_call_output", call_id: "f", output: text }),
   report: (text) => row("response_item", { type: "agent_message", author: "/root/child", recipient: "/root", content: [{ type: "input_text", text }] }),
-  done: (id, last) => row("event_msg", { type: "task_complete", turn_id: id, last_agent_message: last })
+  done: (id, last) => row("event_msg", { type: "task_complete", turn_id: id, last_agent_message: last }),
+  // What actually ran (newer rollouts): one row per execution, real argv and cwd.
+  ran: (command, cwd = "/r") => row("event_msg", { type: "item_completed", thread_id: "s", item: { type: "CommandExecution", id: "e", command: ["/bin/bash", "-lc", command], cwd: `file://${cwd}`, status: "completed", exit_code: 0, aggregated_output: "" } }),
+  loop: (cmds, workdir = "/r") => row("response_item", { type: "custom_tool_call", name: "exec", call_id: "l", input: `for(const cmd of ${JSON.stringify(cmds)}){const r=await tools.exec_command({cmd,workdir:${JSON.stringify(workdir)}});text(r);}` })
 };
 

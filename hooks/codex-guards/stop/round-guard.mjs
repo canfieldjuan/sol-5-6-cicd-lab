@@ -4,44 +4,80 @@ import path from "node:path";
 // Round guard, Codex port (contract 5.3). The rules are a verbatim port of
 // ~/.claude/hooks/round-guard.sh: pushes per branch over the session, the most
 // recently pushed branch as subject, tiers 5/10/15/20, once per
-// (session, branch, tier), except the revision-15 keying of HEAD and bare
-// pushes by working directory. Stamps live in the dispatcher's session state.
+// (session, branch, tier), except the named divergences: HEAD and bare pushes
+// keyed by directory (revision 15), and only command-position pushes counted
+// (revision 16). Stamps live in the dispatcher's session state.
 
 const TIERS = [5, 10, 15, 20];
-const REFSPEC = /git push[^\n|;&]*?\borigin\s+(?:HEAD:)?([\w./-]+)/;
+const REFSPEC = /\borigin\s+(?:HEAD:)?([\w./-]+)/;
 const FLAGS = new Set(["--force", "--force-with-lease", "-q", "--quiet"]);
+// Revision 16: a push is `git [-C dir] push` at a command position (start, or
+// after && || ; | or a newline, after VAR=value prefixes). Text that merely
+// mentions "git push" (a ledger line, an echo, a grep) is not a push.
+const PUSH = /(?:^|&&|\|\||;|\||\n)\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*git\s+(?:-C\s+("[^"]*"|'[^']*'|\S+)\s+)?push\b([^\n|;&]*)/g;
 
-function branchOf(command) {
-  const match = REFSPEC.exec(command);
-  const branch = match ? match[1] : "<current-branch>";
-  return FLAGS.has(branch) ? "<current-branch>" : branch;
+const unquote = (word) => word.replace(/^(["'])(.*)\1$/, "$2");
+
+// Quoted text is data, not commands: blank it out (same length, so positions
+// still index the original) before looking for command separators.
+function maskQuotes(cmd) {
+  let out = "";
+  let quote = null;
+  for (let i = 0; i < cmd.length; i += 1) {
+    const ch = cmd[i];
+    if (quote) {
+      if (quote === '"' && ch === "\\" && i + 1 < cmd.length) { out += "__"; i += 1; continue; }
+      if (ch === quote) { quote = null; out += ch; } else out += ch === "\n" ? "\n" : "_";
+    } else {
+      if (ch === "'" || ch === '"') quote = ch;
+      out += ch;
+    }
+  }
+  return out;
+}
+
+function resolve(target, base) {
+  if (target.startsWith("/")) return path.normalize(target);
+  return base ? path.join(base, target) : null;
 }
 
 // A leading `cd <dir> &&` overrides the call's workdir (relative to it).
-function directoryOf({ cmd, workdir }) {
-  const cd = /^\s*cd\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s*&&/.exec(cmd);
-  const target = cd ? cd[1] ?? cd[2] ?? cd[3] : null;
-  if (target && target.startsWith("/")) return path.normalize(target);
-  if (target && workdir) return path.join(workdir, target);
-  return workdir ?? null;
+function directoryOf(cmd, workdir) {
+  const cd = /^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&/.exec(cmd);
+  return cd ? resolve(unquote(cd[1]), workdir) : workdir ?? null;
 }
 
-// Revision 15: HEAD and bare pushes are keyed by working directory, so pushes
-// from different repositories are never counted as one change's rounds.
-function subjectOf(entry) {
-  const item = typeof entry === "string" ? { cmd: entry, workdir: null } : entry;
-  const branch = branchOf(item.cmd);
-  if (branch !== "HEAD" && branch !== "<current-branch>") return { key: branch, label: `\`${branch}\`` };
-  const dir = directoryOf(item);
-  return dir ? { key: `${branch}@${dir}`, label: `the current branch in ${dir}` } : { key: branch, label: `\`${branch}\`` };
+function originalMatch(cmd, masked) {
+  const original = cmd.slice(masked.index, masked.index + masked[0].length);
+  const again = new RegExp(PUSH.source).exec(original);
+  return again ?? masked;
+}
+
+// Every push in one command, as the subject it counts against.
+export function pushesIn({ cmd, workdir = null }) {
+  const found = [];
+  for (const masked of maskQuotes(cmd).matchAll(PUSH)) {
+    // Match on the masked text; read -C and the arguments from the original.
+    const match = originalMatch(cmd, masked);
+    const refspec = REFSPEC.exec(match[2]);
+    let branch = refspec ? refspec[1] : "<current-branch>";
+    if (FLAGS.has(branch)) branch = "<current-branch>";
+    if (branch !== "HEAD" && branch !== "<current-branch>") { found.push({ key: branch, label: `\`${branch}\`` }); continue; }
+    // Revision 15: HEAD and bare pushes are keyed by directory, so pushes from
+    // different repositories are never counted as one change's rounds.
+    const base = directoryOf(cmd, workdir);
+    const dir = match[1] ? resolve(unquote(match[1]), base) : base;
+    found.push(dir ? { key: `${branch}@${dir}`, label: `the current branch in ${dir}` } : { key: branch, label: `\`${branch}\`` });
+  }
+  return found;
 }
 
 export function roundVerdict(commands, fired = []) {
-  const pushCommands = commands.filter((entry) => (typeof entry === "string" ? entry : entry.cmd).includes("git push"));
-  if (!pushCommands.length) return null;
+  const subjects = commands.flatMap((entry) => pushesIn(typeof entry === "string" ? { cmd: entry } : entry));
+  if (!subjects.length) return null;
   const pushes = new Map();
-  for (const entry of pushCommands) { const { key } = subjectOf(entry); pushes.set(key, (pushes.get(key) ?? 0) + 1); }
-  const subject = subjectOf(pushCommands[pushCommands.length - 1]);
+  for (const { key } of subjects) pushes.set(key, (pushes.get(key) ?? 0) + 1);
+  const subject = subjects[subjects.length - 1];
   const count = pushes.get(subject.key);
   const tier = TIERS.filter((t) => count >= t).pop() ?? 0;
   if (!tier) return null;

@@ -1,4 +1,5 @@
 import { closeSync, openSync, readSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // Codex rollout reader (contract 5.3). Row shapes verified on real rollouts:
 // assistant prose is response_item/message (role assistant, output_text parts);
@@ -83,6 +84,16 @@ function functionCommands(argumentsText) {
   return [];
 }
 
+// Revision 16: a CommandExecution row is one command that actually ran, with
+// its argv and real cwd. The script of a -c/-lc shell argv is the command.
+function executedCommand(item) {
+  const argv = Array.isArray(item.command) ? item.command.map(String) : null;
+  const cmd = argv ? (argv.length >= 3 && /^-l?c$/.test(argv[argv.length - 2]) ? argv[argv.length - 1] : argv.join(" ")) : String(item.command ?? "");
+  let workdir = typeof item.cwd === "string" ? item.cwd : null;
+  if (workdir?.startsWith("file://")) { try { workdir = fileURLToPath(workdir); } catch { workdir = null; } }
+  return { cmd, workdir };
+}
+
 export function readRollout(file, { turnId = null, lastAssistantMessage = null } = {}) {
   const rows = [];
   let turnStart = 0;
@@ -102,13 +113,15 @@ export function readRollout(file, { turnId = null, lastAssistantMessage = null }
 
   const prose = [];
   const evidence = [];
-  const commands = [];
+  const literals = [];
+  const executed = [];
   rows.forEach((row, index) => {
     if (!row) return;
     const { type, payload } = row;
     const inTurn = index >= turnStart;
-    if (type === "response_item" && payload.type === "custom_tool_call" && payload.name === "exec" && typeof payload.input === "string") commands.push(...execCommands(payload.input));
-    else if (type === "response_item" && payload.type === "function_call") commands.push(...functionCommands(payload.arguments));
+    if (type === "response_item" && payload.type === "custom_tool_call" && payload.name === "exec" && typeof payload.input === "string") literals.push(...execCommands(payload.input));
+    else if (type === "response_item" && payload.type === "function_call") literals.push(...functionCommands(payload.arguments));
+    else if (type === "event_msg" && payload.type === "item_completed" && payload.item?.type === "CommandExecution") executed.push(executedCommand(payload.item));
     if (!inTurn) return;
     if (type === "response_item" && payload.type === "message" && payload.role === "assistant") {
       const text = (payload.content ?? []).filter((part) => part && (part.type === "output_text" || part.type === "text")).map((part) => part.text ?? "").join("");
@@ -125,5 +138,7 @@ export function readRollout(file, { turnId = null, lastAssistantMessage = null }
   });
   // The final message may not be flushed to the rollout when Stop fires.
   if (typeof lastAssistantMessage === "string" && lastAssistantMessage.trim() && !prose.some((text) => text.trim() === lastAssistantMessage.trim())) prose.push(lastAssistantMessage);
-  return { prose, evidence, commands };
+  // Executed rows replace the source literals (never add to them); sessions
+  // from Codex versions without the rows fall back to the literals.
+  return { prose, evidence, commands: executed.length ? executed : literals };
 }

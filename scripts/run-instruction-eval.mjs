@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmod, copyFile, mkdir, mkdtemp, open, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fail, isMain, readJson, rootDir, walkFiles } from "./lib.mjs";
@@ -89,6 +89,24 @@ export async function eventStreamError(eventsFile) {
   return null;
 }
 
+async function copyRollouts(sessionsDir, target) {
+  const found = [];
+  const walk = async (dir) => {
+    let entries;
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else if (entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")) found.push(full);
+    }
+  };
+  await walk(sessionsDir);
+  if (!found.length) return;
+  const parts = [];
+  for (const file of found.sort()) parts.push(await readFile(file, "utf8"));
+  await writeFile(target, parts.join(""));
+}
+
 export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "codex", model, effort, timeoutMs, artifactBase, authPath }) {
   const runDir = await mkdtemp(path.join(stateRoot, "run-"));
   const fixture = await mkdtemp(path.join(os.tmpdir(), "instr-fixture-"));
@@ -144,6 +162,10 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
       { cwd: fixture, env, timeoutMs, stdoutFile: eventsFile });
     if (scenario.guards) {
       try { await copyFile(path.join(guardState, "denials.jsonl"), denialsFile); } catch { await writeFile(denialsFile, ""); }
+      // Keep what a guard miss needs for diagnosis: the guard's error log and
+      // the run's rollout(s). Both are eval-fixture data; runDir is deleted below.
+      try { await copyFile(path.join(guardState, "errors.log"), `${artifactBase}.guard-errors.log`); } catch {}
+      await copyRollouts(path.join(codexHome, "sessions"), `${artifactBase}.rollout.jsonl`);
     }
     if (result.timedOut) return { status: "error", reason: `timed out after ${timeoutMs} ms` };
     if (result.code !== 0) {
@@ -156,7 +178,10 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
     try {
       const graded = await gradeFiles(scenarioDir, eventsFile, shimLog, scenario.guards ? denialsFile : null);
       const status = graded.exercised === false && graded.pass ? "unexercised" : graded.pass ? "pass" : "fail";
-      return { status, failures: graded.failures, formatMisses: graded.formatMisses, usage: graded.usage };
+      // A failed run whose required guard never fired must say so; otherwise a
+      // guard miss hides behind the other failures.
+      const failures = graded.exercised === false && !graded.pass ? [`required guard denial absent (${(scenario.expected.requiredDenials ?? []).join(", ")})`, ...graded.failures] : graded.failures;
+      return { status, failures, formatMisses: graded.formatMisses, usage: graded.usage };
     } catch (error) {
       return { status: "error", reason: error.message };
     }
