@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 4. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 5. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -118,10 +118,20 @@ product code.
 
 ### Guards and hooks (steps 2-4)
 
-- **H1 Block and redirect, never end the turn.** A PreToolUse guard uses
-  `permissionDecision:"deny"`, which refuses only that call. A Stop guard uses
-  `decision:"block"`, which continues the turn with the reason as the next
-  prompt. No guard uses `continue:false` or anything else that stops the session.
+- **H1 Block and redirect, never end the turn.** No guard uses
+  `continue:false` or anything else that stops the session. Measured in section
+  5.1, a PreToolUse deny always refuses the call and delivers the reason, but
+  the model acts on the reason only some of the time. So a redirect is built
+  one of two ways:
+  (a) **Rewrite**, when the correct command is certain: PreToolUse
+  `permissionDecision:"allow"` plus `updatedInput`.
+  (b) **Deny + Stop backstop**, otherwise: the PreToolUse deny records a
+  pending redirect in the guard's state. If the model tries to finish while it
+  is unaddressed, the Stop hook returns `decision:"block"` with the same reason,
+  which continues the turn and was acted on every time it was measured.
+  A pending redirect clears when a later call satisfies it (the corrected
+  command runs, or the out-of-scope work is abandoned) or when the Stop hook
+  has already fired for it once (`stop_hook_active`), so a turn cannot loop.
 - **H2 Actionable reason.** Every reason names the correct next action: the
   existing path, the right command, the helper to use, or the declared scope. A
   reason that only names the violation fails review.
@@ -138,8 +148,12 @@ product code.
   in another repo are denied with a redirect naming the scope.
 - **H6 Claude isolation.** Codex guards are separate modules. Nothing changes
   the behavior of hooks Claude Code runs.
-- **H7 Trust.** Installers never hand-write `[hooks.state]` trust hashes. Step 2
-  determines Codex's own trust flow, and installers use it.
+- **H7 Trust.** Installers never hand-write `[hooks.state]` trust hashes. An
+  untrusted hook is silently skipped (section 5.1), so an installed guard that
+  is not trusted does nothing and says nothing. Every installer therefore ends
+  with an activation check that proves the installed hook fires, and fails
+  loudly if it does not. The way trust is granted (Codex's own review flow) is
+  specified in the step-3 contract revision.
 
 ## 5. Step 2 probe: what must be proven
 
@@ -159,6 +173,24 @@ transcript for each of these:
 
 Every result becomes a revision of this contract, with a claim and its evidence,
 before step 3 designs on it.
+
+## 5.1 Probe results (codex-cli 0.156.0, gpt-6-sol / medium, 2026-09-22)
+
+Produced by `scripts/probe-codex-hooks.mjs`. Counts are across every probe run
+made that day (artifacts under the ignored `artifacts/hook-probe/`).
+
+| Question | Result | Evidence |
+| --- | --- | --- |
+| Q1 apply_patch reaches hooks | Yes. PreToolUse and PostToolUse fire with `tool_name: "apply_patch"`; the patch text is `tool_input.command`; PostToolUse `tool_response` is the "Exit code / Output" text | hook logs |
+| Q2 PreToolUse deny | Refuses the call 7/7. The model receives `Script error: Command blocked by PreToolUse hook: <reason>`, and the turn continues. The denied call is absent from the `exec --json` event stream (visible only in the session rollout) | rollouts, hook logs |
+| Q2b model follows the deny reason | 3/7 | per-run agent messages |
+| Q3 Stop `decision:"block"` | Continues the turn, and the model acts on the reason 11/11; the second Stop carries `stop_hook_active: true` | event streams, hook logs |
+| Q4 PostToolUse `additionalContext` | Delivered as a developer-role message and used in a reply. A later Stop continuation can replace the final message | rollouts |
+| Q5 `updatedInput` rewrite | Rewrites the call 4/4 | event streams |
+| Q6 untrusted hook (no `--dangerously-bypass-hook-trust`) | Silently skipped 4/4: no hook events and no warning | hook logs, stderr |
+
+codex-cli upgraded from 0.155.1 to 0.156.0 during this work. The probe is
+re-run on every upgrade before guards are trusted.
 
 ## 6. Failure cases
 
