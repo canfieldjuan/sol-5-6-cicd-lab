@@ -1,6 +1,6 @@
 # Instruction Retention Contract
 
-Status: ACCEPTED (PR #6), revision 5. No implementation starts until the operator
+Status: ACCEPTED (PR #6), revision 6. No implementation starts until the operator
 accepts this contract (contract-first rule). If implementation exposes a missing
 decision, this file is revised and recommitted before that behavior is coded.
 
@@ -144,6 +144,16 @@ candidate: G4's exemption covers the class, "a search or comparison whose exit
 1 only means no match or differs (`grep`, `rg`, `git grep`, `diff`, `cmp`,
 `test`)". Every other G4 sentence stays verbatim, and the full B1 matrix is
 rerun on the revised candidate.
+
+Installing the candidate (revision 6). The S6 installer installs the tracked
+baseline source (`instructions/codex-global/AGENTS.md`). By default it still
+does; `--candidate` makes it install `instructions/candidate/codex-global/AGENTS.md`
+(the inventory's `candidate.G`) instead. Every S6 rule is unchanged: dry-run
+unless `--apply`, refuse a hand-edited target, timestamped backup, atomic
+rename, and state recording the last installed hash. Rollback is the default
+invocation with `--apply`: after a candidate install the target matches the last
+installed hash, so reinstalling the baseline is allowed. The candidate is
+installed only on the operator's explicit approval.
 
 Behavioral invariants (eval lane, run on demand):
 
