@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 13; section 5.2 accepted (PR #13), amended in revisions 7-13. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 14; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) proposed in revision 14. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -291,6 +291,133 @@ unresolved threads. It is built from the verified queries in
   shows the redirect acted on before the turn ends.
 - `analyze-tool-failures.mjs` on post-install sessions reports the class delta
   (step 5).
+
+## 5.3 Step-4 specification: Codex ports of the Stop gates (revision 14; proposed)
+
+### Reproduction (2026-09-23)
+
+`~/.codex/hooks/evidence-gate.sh` and `~/.codex/hooks/round-guard.sh` are
+byte-identical to the Claude copies and are registered as Codex Stop hooks in
+`~/.codex/hooks.json`. Codex passes `transcript_path` (the codex binary
+contains the field in its hook input schemas), so both hooks run. They never
+block, because they parse only the Claude transcript row shape.
+- Specimen: a real Codex rollout, plus one appended assistant row in the
+  rollout's own shape claiming "Committed as deadbeefc0ffee1 ... 41 passed".
+  `evidence-gate.sh`: exit 0, no output.
+- The only variable changed is the row shape. The same sentence as a Claude row
+  blocks, listing `test count: 41 passed` and `git object id: deadbeefc0ffee1`.
+  The same holds for `round-guard.sh`: five pushes in Claude shape block, and
+  five pushes in Codex shape do not.
+- Root cause: the row parser. The token rules and thresholds are not at fault.
+
+Codex rollout facts, from 40 recent rollouts:
+- Every `git push` (211 of 211) runs inside a code-mode
+  `response_item/custom_tool_call` named `exec`, whose `input` is a JS script
+  calling `tools.exec_command({"cmd": "...", ...})`, sometimes several times in
+  one script. None ran as a plain `function_call`.
+- Tool output is in `custom_tool_call_output` and `function_call_output`. The
+  `output` is either a string or a list of `{text}` parts, and an `exec` chunk
+  may be a JSON object with `output` and `exit_code`.
+- Assistant prose is `response_item/message` with role `assistant` and
+  `output_text` parts. `event_msg/agent_message` duplicates it and is ignored.
+- Each turn starts with `event_msg/task_started` carrying `turn_id`.
+
+### Design
+
+- **Where.** The two Stop gates become Stop checks inside the guard dispatcher
+  (`hooks/codex-guards/guard.mjs`), in `hooks/codex-guards/stop/`, and not
+  separate hook entries:
+  - one Stop invocation;
+  - one combined block reason with the pending guard redirects;
+  - one `stop_hook_active` rule, so the whole Stop still blocks at most once.
+
+  They are installed and trusted with the existing guards (no new hooks.json
+  entry, so no new trust step). The dormant shell entries stay registered,
+  because trust is keyed by position and removing entries would shift it. They
+  remain no-ops, which the reproduction shows, and they cost a few
+  milliseconds. The Claude hooks are untouched (H6).
+- **Rollout reader** (`hooks/codex-guards/lib/rollout.mjs`). A streaming parse
+  of `transcript_path`:
+  - It tolerates bad lines, missing files, and control characters (JSON with
+    `strict=False` semantics). A reader error means that gate is skipped and
+    logged (H4).
+  - Current turn: the rows after the last `task_started`. If there is none, the
+    whole file.
+  - Prose: the assistant `output_text` in the current turn, plus the Stop
+    input's `last_assistant_message` when it is not already present, since the
+    final message may not be flushed to the rollout when Stop fires.
+  - Evidence: every tool output text in the current turn. For a JSON `exec`
+    chunk, its `output` plus `exit_code=N`.
+  - Commands: every `cmd` string literal of `tools.exec_command({...})` in
+    `exec` inputs, JSON-decoded, plus `function_call` arguments `cmd` or
+    `command`. For the whole session, not only the turn.
+- **evidence gate (port).** The same rules as `evidence-gate.sh`, ported
+  verbatim:
+  - token patterns: test node, test count, exit code, git object id;
+  - required context (TEST_CTX, GIT_CTX);
+  - hedging judged in the token's own sentence;
+  - fenced blocks ignored;
+  - backed = appears case-insensitively in the current turn's evidence;
+  - at most 12 tokens listed.
+
+  The block reason keeps the three options (run it and quote the output, mark
+  it unverified, attribute it), which is H2 for a claim.
+- **round guard (port).** The same rules as `round-guard.sh`:
+  - it counts `git push` commands per branch over the session;
+  - the refspec regex and the `<current-branch>` fallback are unchanged;
+  - the subject is the most recently pushed branch;
+  - tiers are 5/10/15/20;
+  - it fires once per (session, branch, tier).
+
+  The stamps live in the dispatcher's session state (`roundGuardFired`), not in
+  `~/.claude/hooks/state`. The reason keeps the four questions (root cause, own
+  churn, the cut, the decision), and names `/home/.../.codex/hooks/CONTRACT.md`
+  by absolute path only if that file exists, so no dangling pointer (H2).
+- **Answered (revision 9 analogue).**
+  - The evidence gate has none of its own: re-running the same check on the
+    next Stop is the answer, and `stop_hook_active` stops a loop.
+  - The round guard is answered only by a final message that addresses it. It
+    fires once per tier regardless.
+- **Parity.** A shared claim corpus runs through both
+  `~/.claude/hooks/evidence-gate.sh` (Claude-shape transcript) and the Node gate
+  (the equivalent Codex rollout), and the verdicts must be identical. The same
+  applies to round-guard counts. This locks the port against drift from the
+  Claude original. The test reads the Claude script from
+  `$HOME/.claude/hooks/`, and skips with a visible message when that file is
+  absent (CI), with a vendored copy of the corpus verdicts as the fallback
+  assertion.
+
+### Settling evidence for step 4
+
+- Must block on a real rollout: a copy of a real Codex rollout with one
+  appended final message, in the rollout's own shape, making an unbacked claim;
+  and a real rollout (or a copy of one) with at least 5 pushes to one branch in
+  real `exec` shape.
+- Must pass on real rollouts: the same claim when the token is in that turn's
+  tool output; a hedged claim; a claim without test or git context; a session
+  with 4 pushes; and the most recent 20 real rollouts replayed at each
+  `task_complete`. The replay's block rate is reported. It is not asserted,
+  because some historical turns really did make unbacked claims. Every replay
+  block is listed for review before merge, to find false blocks (H3).
+- Unit tests on both sides for:
+  - the rollout reader: turn boundary, several `exec_command` calls in one
+    script, escaped quotes in `cmd`, list and string outputs, JSON `exec`
+    chunks, bad lines;
+  - once-per-Stop blocking together with pending guard redirects.
+- A live eval scenario per gate:
+  - `stop-evidence`: a task whose natural reply cites a SHA that the model has
+    to fetch;
+  - `stop-round`: a fixture repo and task that push 5 times.
+
+  Each is graded on the block firing and the model acting on it before the turn
+  ends. The fixture remote is a local bare repo, so nothing leaves the machine.
+
+### Behavior change for the operator
+
+Once installed, Codex turns that cite unbacked counts, SHAs, or test nodes get
+one continuation asking for evidence or a hedge. Fix loops get a
+checkpoint question at 5, 10, 15, and 20 pushes per branch. Neither ends a
+turn.
 
 ## 6. Failure cases
 
