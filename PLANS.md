@@ -122,7 +122,7 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - [x] Step 3: codex-pr-status helper (installed as a ~/.local/bin wrapper).
 - [x] Step 3 guard 5 (rediscovery; revision 11 hint before the sweep: sweeps 4 -> 1 per incident).
 - [x] Step 3 guard 6 (scope; revisions 12-13: denies out-of-scope writes and cd into other repos, blocks new drift once at Stop; live 3/3).
-- [ ] Step 4: Codex ports of evidence-gate and round-guard.
+- [x] Step 4: Codex ports of evidence-gate and round-guard (revisions 14-16; replay 20 rollouts reviewed; live stop-round 3/3; stop-evidence unexercised 3/3, model verified first).
 - [ ] Step 5: before/after measurement and AGENTS.md trim candidates.
 
 ## Recovery
