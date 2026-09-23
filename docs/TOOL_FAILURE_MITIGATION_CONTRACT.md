@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 5. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 6 (section 5.2, the step-3 spec, awaits operator acceptance). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -189,8 +189,78 @@ made that day (artifacts under the ignored `artifacts/hook-probe/`).
 | Q5 `updatedInput` rewrite | Rewrites the call 4/4 | event streams |
 | Q6 untrusted hook (no `--dangerously-bypass-hook-trust`) | Silently skipped 4/4: no hook events and no warning | hook logs, stderr |
 
+| Q7 hook sees the command's working directory | **No.** `tool_input` is only `{command}`, and hook `cwd` is the session directory, not the `workdir` the model passed | workdir run: the model ran `pwd` in `.../sub`, the output was `.../sub`, and the hook saw only the session cwd |
+| Q8 PreToolUse for a missing working directory | Fires, but carries no workdir. No PostToolUse follows the CreateProcess failure | badwd run: hook log and rollout |
+
 codex-cli upgraded from 0.155.1 to 0.156.0 during this work. The probe is
 re-run on every upgrade before guards are trusted.
+
+## 5.2 Step-3 guard specification (revision 6; awaits operator acceptance)
+
+### Constraints from the probe
+
+- A hook cannot see where a command runs (Q7). The **base directory** of a
+  command is known only when the command states it: a leading `cd <dir> &&` or
+  `cd <dir>;`, or an absolute path argument. A check on a relative path with an
+  unknown base is **skipped**, never guessed (H3).
+- Nothing is observable after a failed process start (Q8). Nonexistent
+  `workdir` (`bad-workdir`) is therefore **not guardable** and is left to the
+  model. It costs 67 failures and 0.42M uncached tokens per quarter.
+- `sandbox` and `vcs-auth` are configuration faults, not tool misuse. They are
+  investigated separately (their own issue), not guarded.
+- `git_guard.py` reads `tool_input.workdir`, a field Codex never sends. Its
+  workdir branch is dead under Codex; the shared file is not changed (H6).
+
+### Architecture
+
+- One Codex-only guard program, `hooks/codex-guards/guard.mjs` (Node, no
+  dependencies), tracked in this lab and installed to
+  `~/.codex/hooks/lab-guards/` by an installer with the same guarantees as
+  `install-codex-global.mjs`: dry run by default, hash-guarded, backups and
+  state under `~/.local/state/sol-lab/`.
+- It is registered by adding entries to `~/.codex/hooks.json` for PreToolUse
+  (matcher `*`), PostToolUse (matcher `*`), and Stop. Existing entries
+  (git-guard, evidence-gate, round-guard, compaction-digest) are untouched.
+- **Per-session state**: `~/.local/state/sol-lab/guards/<session_id>.json`
+  holds pending redirects and a heartbeat.
+- **Stop backstop (H1b)**: if any redirect is pending and `stop_hook_active` is
+  false, Stop returns `decision:"block"` with the pending reasons. Otherwise it
+  clears them and allows the stop. A turn is never blocked twice.
+- **Fail open (H4)**: any exception allows the call and appends to
+  `guards/errors.log`. A hook timeout is treated the same way.
+- **Activation (H7)**: after install, the operator trusts the hooks once in the
+  Codex TUI (`/hooks`). `npm run guards:status` then passes only if the
+  heartbeat was written after the install time by a real session. Until then
+  the installer reports the guards as **installed, not active**.
+
+### Guards, in ranked order
+
+| # | Guard | Trigger (all conditions) | Action | Pending redirect cleared by |
+|---|---|---|---|---|
+| 1 | read-path | A read-only command (`cat`, `sed -n`, `head`, `tail`, `nl`, `ls`, `rg`/`grep` path arguments) names a path that does not exist, whose base is known, with no file-creating segment earlier in the same command; or an `apply_patch` `*** Update File:` / `*** Delete File:` whose absolute path does not exist | Deny + Stop backstop. The reason lists up to 5 existing candidates: same basename under the nearest existing ancestor, via `git ls-files` or a bounded directory listing | a later call that reads an existing path in that directory tree |
+| 2 | wrong-repo-script | `bash\|sh scripts/X` or `./scripts/X` with a known base where `<base>/scripts/X` does not exist | Deny + Stop backstop. The reason lists `<base>/scripts/` and the known repos where X exists | a later call that runs an existing script, or none |
+| 3 | psql | `psql` with no `-h`/`--host`, no `PGHOST=` prefix, and no connection URI, when `db.json` (installer-written) defines the target | **Rewrite** (H1a) to add `-h <host> -p <port> -U <user>`, and `-d <db>` if absent. With no `db.json`: no action | n/a |
+| 4 | gh-fields | `gh pr view` / `gh issue view` with `--json` naming a field outside gh's own list (captured at install from gh's error output) | Deny + Stop backstop. The reason lists the valid fields and names `codex-pr-status` | a later `gh` call that passes the check |
+| 5 | rediscovery | `find` rooted at `~`, `/`, `/media`, `/tmp`, or `~/Desktop` without `-maxdepth` of 2 or less | PostToolUse `additionalContext` with the known-repo map (`repos.json`). Never a deny: a sweep does not fail (H3) | n/a |
+| 6 | scope | Active only if `<session cwd>/.codex/scope.json` exists (repo roots, allowed globs, PR, goal). Trips on an `apply_patch` target outside the allowed globs, or a `cd` into a directory outside the declared roots | Deny + Stop backstop. The reason names the declared PR/goal and allowed globs. At Stop, `git diff --name-only` in each declared root that shows files outside the globs also blocks (drift) | reverting or confirming out-of-scope changes; or the Stop has fired once |
+
+`codex-pr-status --repo R --pr N` (installed to `~/.local/bin`) prints JSON
+with state, head SHA, mergeable, required and all checks, reviews, and
+unresolved threads. It is built from the verified queries in
+`Atlas/scripts/check_ai_reconciliation_live.py:59-113` and
+`~/.local/bin/atlas-pr-watch:229-295`.
+
+### Settling evidence for step 3
+
+- Each guard has unit tests on both sides: an input that must trip and a near
+  miss that must not, including an unknown base (skipped), a creating segment,
+  and an existing path.
+- Each guard's deny/rewrite output validates against the probe-verified hook
+  output shape.
+- A live eval scenario per guard (runner in `scripts/run-instruction-eval.mjs`)
+  shows the redirect acted on before the turn ends.
+- `analyze-tool-failures.mjs` on post-install sessions reports the class delta
+  (step 5).
 
 ## 6. Failure cases
 
