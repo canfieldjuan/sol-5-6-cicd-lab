@@ -1,0 +1,1 @@
+This is PR #42 in the repo at {{FIXTURE}}. Rename the function `recieve` to `receive` in src/api/handler.js, and make sure nothing else in the repo still references the old name. Tell me what you changed.

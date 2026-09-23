@@ -10,13 +10,15 @@ import { answeredWrongRepoScript, checkWrongRepoFailure, checkWrongRepoScript, s
 import { checkPsql } from "./guards/psql.mjs";
 import { checkGhFields, satisfiesGhFields } from "./guards/gh-fields.mjs";
 import { checkRediscoveryBefore } from "./guards/rediscovery.mjs";
+import { answeredScope, checkScope, loadScope, scopeBaseline, scopeDrift } from "./guards/scope.mjs";
 
 export const GUARDS = [
   { code: "read-path", check: checkReadPath, after: checkReadFailure, satisfied: satisfiesReadPath, answered: answeredReadPath },
   { code: "wrong-repo-script", check: checkWrongRepoScript, after: checkWrongRepoFailure, satisfied: satisfiesWrongRepoScript, answered: answeredWrongRepoScript },
   { code: "psql", check: checkPsql },
   { code: "gh-fields", check: checkGhFields, satisfied: satisfiesGhFields },
-  { code: "rediscovery", check: checkRediscoveryBefore }
+  { code: "rediscovery", check: checkRediscoveryBefore },
+  { code: "scope", check: checkScope, answered: answeredScope }
 ];
 
 export function stateDir(env = process.env) {
@@ -39,6 +41,13 @@ const sessionFile = (dir, sessionId) => path.join(dir, `session-${String(session
 export function decide(input, state, { home = os.homedir(), guards = GUARDS, config = {} } = {}) {
   const event = input.hook_event_name;
   const pending = [...(state.pending ?? [])];
+  const result = decideInner(input, state, pending, { home, guards, config });
+  // Keep state beyond `pending` (e.g. the scope baseline) across every event.
+  return { ...result, state: { ...state, ...result.state } };
+}
+
+function decideInner(input, state, pending, { home, guards, config }) {
+  const event = input.hook_event_name;
   const command = typeof input.tool_input?.command === "string" ? input.tool_input.command : "";
 
   if (event === "PreToolUse") {
@@ -85,6 +94,11 @@ export function decide(input, state, { home = os.homedir(), guards = GUARDS, con
 
   if (event === "Stop") {
     // H1b backstop: block once while redirects are pending; never twice.
+    // Scope drift (revision 12): files dirtied since session start outside the allow globs.
+    const drift = state.scopeBaseline ? scopeDrift({ cwd: input.cwd, baseline: state.scopeBaseline }) : null;
+    if (drift) pending.push(drift);
+    // Reported drift joins the baseline so the same files never block a later turn.
+    const acknowledged = drift ? { scopeBaseline: Object.fromEntries(Object.entries(state.scopeBaseline).map(([root, files]) => [root, [...new Set([...files, ...(drift.byRoot[root] ?? [])])]])) } : {};
     // Revision 9: a redirect the final message already acts on is resolved.
     const open = pending.filter((item) => {
       const guard = guards.find((candidate) => candidate.code === item.code);
@@ -92,9 +106,9 @@ export function decide(input, state, { home = os.homedir(), guards = GUARDS, con
     });
     if (open.length && !input.stop_hook_active) {
       const reasons = open.map((item) => item.reason).join("\n\n");
-      return { output: { decision: "block", reason: `Before finishing, act on the guard redirect(s) below; they were blocked, not resolved.\n\n${reasons}` }, state: { pending: [] } };
+      return { output: { decision: "block", reason: `Before finishing, act on the guard redirect(s) below; they were blocked, not resolved.\n\n${reasons}` }, state: { pending: [], ...acknowledged }, ...(drift && open.some((item) => item === drift) ? { redirected: "scope", redirectKind: "stop-drift" } : {}) };
     }
-    return { output: null, state: { pending: [] } };
+    return { output: null, state: { pending: [], ...acknowledged } };
   }
 
   return { output: null, state: { pending } };
@@ -108,7 +122,17 @@ export function run(rawInput, env = process.env) {
   const file = sessionFile(dir, input.session_id);
   // Per-machine guard config (contract revision 8); absent config = those guards do nothing.
   const config = readJson(path.join(dir, "config.json"), {});
-  const { output, state, denied, redirected, redirectKind, rewritten } = decide(input, readJson(file, { pending: [] }), { home: env.HOME || os.homedir(), config });
+  const previous = readJson(file, { pending: [] });
+  // Scope baseline (revision 12): snapshot at the first guard event where scope.json is active.
+  if (!previous.scopeBaseline) {
+    const scope = loadScope(input.cwd);
+    if (scope?.error && !previous.scopeErrorLogged) {
+      appendFileSync(path.join(dir, "errors.log"), `${new Date().toISOString()} scope: ${scope.error}\n`);
+      previous.scopeErrorLogged = true;
+    }
+    previous.scopeBaseline = scopeBaseline(input.cwd);
+  }
+  const { output, state, denied, redirected, redirectKind, rewritten } = decide(input, previous, { home: env.HOME || os.homedir(), config });
   writeJsonAtomic(file, state);
   if (denied || redirected || rewritten) {
     const kind = denied ? "deny" : redirected ? redirectKind : "rewrite";
