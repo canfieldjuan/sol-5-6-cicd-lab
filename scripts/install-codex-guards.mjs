@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -76,6 +77,22 @@ export function guardConfig({ repos = [], db = null }) {
   return config;
 }
 
+// Guard 4: gh prints its valid --json fields when --json has no value, offline.
+export const GH_JSON_COMMANDS = ["pr view", "pr list", "pr checks", "issue view", "issue list", "run view", "run list", "repo view"];
+export function parseGhFieldList(text) {
+  if (!/Specify one or more comma-separated fields for `--json`/.test(text)) return null;
+  return text.split("\n").slice(1).map((line) => line.trim()).filter((line) => /^[A-Za-z][\w]*$/.test(line));
+}
+export function captureGhFields(run = (args) => spawnSync("gh", args, { encoding: "utf8", cwd: os.tmpdir(), timeout: 10000 })) {
+  const fields = {};
+  for (const key of GH_JSON_COMMANDS) {
+    const result = run([...key.split(" "), "--json"]);
+    const list = parseGhFieldList(`${result.stdout ?? ""}${result.stderr ?? ""}`);
+    if (list?.length) fields[key] = list;
+  }
+  return fields;
+}
+
 export async function install({ source, installDir, hooksJson, stateDir, apply = false, now = new Date(), config = null }) {
   await mkdir(stateDir, { recursive: true });
   const lockPath = path.join(stateDir, "guards-install.lock");
@@ -143,6 +160,8 @@ async function main() {
   const apply = process.argv.includes("--apply");
   const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; };
   const config = guardConfig({ repos: (arg("--repos") ?? "").split(",").filter(Boolean), db: arg("--db") ?? null });
+  const ghFields = captureGhFields();
+  if (Object.keys(ghFields).length) config.ghFields = ghFields;
   const paths = defaultPaths();
   const result = await install({ ...paths, apply, config });
   if (Object.keys(config).length) console.log(`guard config: ${JSON.stringify(config)}`);

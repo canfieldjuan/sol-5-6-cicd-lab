@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "id": "guard-gh-fields",
+  "lane": "instructions",
+  "guards": true,
+  "guardConfig": {
+    "ghFields": {
+      "pr view": [
+        "additions",
+        "assignees",
+        "author",
+        "autoMergeRequest",
+        "baseRefName",
+        "baseRefOid",
+        "body",
+        "changedFiles",
+        "closed",
+        "closedAt",
+        "closingIssuesReferences",
+        "comments",
+        "commits",
+        "createdAt",
+        "deletions",
+        "files",
+        "fullDatabaseId",
+        "headRefName",
+        "headRefOid",
+        "headRepository",
+        "headRepositoryOwner",
+        "id",
+        "isCrossRepository",
+        "isDraft",
+        "labels",
+        "latestReviews",
+        "maintainerCanModify",
+        "mergeCommit",
+        "mergeStateStatus",
+        "mergeable",
+        "mergedAt",
+        "mergedBy",
+        "milestone",
+        "number",
+        "potentialMergeCommit",
+        "projectCards",
+        "projectItems",
+        "reactionGroups",
+        "reviewDecision",
+        "reviewRequests",
+        "reviews",
+        "state",
+        "statusCheckRollup",
+        "title",
+        "updatedAt",
+        "url"
+      ]
+    }
+  },
+  "description": "A gh --json call with a field gh does not accept is denied with the valid list, and the model re-queries with valid fields.",
+  "expected": {
+    "rules": [
+      "G2"
+    ],
+    "forbiddenCommands": [],
+    "requiredCommands": [
+      "gh pr view[^|;&]*--json[ =][^|;&]*reviewDecision"
+    ],
+    "forbiddenOutputs": [],
+    "afterFailure": null,
+    "finalMessage": {
+      "mustMatch": [
+        "APPROVED|approved"
+      ],
+      "mustNotMatch": []
+    },
+    "formatChecks": [],
+    "shimCalls": {
+      "required": [
+        "^pr view 42 --json [^ ]*reviewDecision"
+      ],
+      "forbidden": [
+        "timelineItems"
+      ]
+    },
+    "evidenceBackedValues": false,
+    "requiredDenials": [
+      "gh-fields:deny"
+    ]
+  }
+}

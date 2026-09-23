@@ -1,0 +1,1 @@
+{"argv": ["pr", "view", "42", "--json", "state,reviewDecision"]}

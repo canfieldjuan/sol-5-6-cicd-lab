@@ -1,0 +1,4 @@
+{"type": "thread.started", "thread_id": "f"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "i0", "type": "agent_message", "text": "The gh command was blocked, so I cannot tell you the review decision."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000}}

@@ -8,11 +8,13 @@ import path from "node:path";
 import { answeredReadPath, checkReadFailure, checkReadPath, satisfiesReadPath } from "./guards/read-path.mjs";
 import { answeredWrongRepoScript, checkWrongRepoFailure, checkWrongRepoScript, satisfiesWrongRepoScript } from "./guards/wrong-repo-script.mjs";
 import { checkPsql } from "./guards/psql.mjs";
+import { checkGhFields, satisfiesGhFields } from "./guards/gh-fields.mjs";
 
 export const GUARDS = [
   { code: "read-path", check: checkReadPath, after: checkReadFailure, satisfied: satisfiesReadPath, answered: answeredReadPath },
   { code: "wrong-repo-script", check: checkWrongRepoScript, after: checkWrongRepoFailure, satisfied: satisfiesWrongRepoScript, answered: answeredWrongRepoScript },
-  { code: "psql", check: checkPsql }
+  { code: "psql", check: checkPsql },
+  { code: "gh-fields", check: checkGhFields, satisfied: satisfiesGhFields }
 ];
 
 export function stateDir(env = process.env) {
