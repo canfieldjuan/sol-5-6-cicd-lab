@@ -1,0 +1,4 @@
+{"type": "thread.started", "thread_id": "f"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "i0", "type": "agent_message", "text": "The read of docs/SETUP.md was blocked by a hook, so I could not read the setup guide."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000}}

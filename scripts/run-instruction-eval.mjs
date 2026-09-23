@@ -97,6 +97,8 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
   const bin = path.join(runDir, "bin");
   const eventsFile = `${artifactBase}.jsonl`;
   const shimLog = `${artifactBase}.gh.log`;
+  const denialsFile = `${artifactBase}.denials.jsonl`;
+  const scenario = JSON.parse(await readFile(path.join(scenarioDir, "scenario.json"), "utf8"));
   try {
     await mkdir(codexHome, { recursive: true });
     await mkdir(fakeHome, { recursive: true });
@@ -106,6 +108,13 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
     await writeFile(path.join(codexHome, "config.toml"), configToml({ model, effort }));
     await symlink(authPath, path.join(codexHome, "auth.json"));
     try { await symlink(path.join(home, ".gitconfig"), path.join(fakeHome, ".gitconfig")); } catch {}
+    const guardState = path.join(runDir, "guards");
+    if (scenario.guards) {
+      // Contract 5.2: run the lab guards from the repo, trusted for this run only.
+      const command = `node '${path.join(rootDir, "hooks", "codex-guards", "guard.mjs")}'`;
+      const entry = (matcher) => ({ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: 10 }] });
+      await writeFile(path.join(codexHome, "hooks.json"), JSON.stringify({ hooks: { PreToolUse: [entry("*")], PostToolUse: [entry("*")], Stop: [entry(null)] } }, null, 2));
+    }
     await copyFile(path.join(rootDir, "scripts", "shims", "gh.mjs"), path.join(bin, "gh"));
     await chmod(path.join(bin, "gh"), 0o755);
     await writeFile(shimLog, "");
@@ -115,6 +124,7 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
       CODEX_HOME: codexHome, HOME: fakeHome,
       PATH: `${bin}${path.delimiter}${process.env.PATH}`,
       SHIM_GH_LOG: shimLog,
+      SOL_LAB_GUARD_STATE: guardState,
       GIT_AUTHOR_NAME: "Eval", GIT_AUTHOR_EMAIL: "eval@example.invalid",
       GIT_COMMITTER_NAME: "Eval", GIT_COMMITTER_EMAIL: "eval@example.invalid"
     };
@@ -124,9 +134,13 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
     if (setup.status !== 0) return { status: "error", reason: `setup.sh exited ${setup.status}: ${setup.stderr.slice(-300)}` };
     await writeFile(shimLog, ""); // setup must not count as agent calls
 
-    const prompt = await readFile(path.join(scenarioDir, "task.md"), "utf8");
-    const result = await runProcess(codexBin, ["exec", "--json", "--skip-git-repo-check", prompt],
+    const prompt = (await readFile(path.join(scenarioDir, "task.md"), "utf8")).replaceAll("{{FIXTURE}}", fixture);
+    const trustFlag = scenario.guards ? ["--dangerously-bypass-hook-trust"] : [];
+    const result = await runProcess(codexBin, ["exec", "--json", "--skip-git-repo-check", ...trustFlag, prompt],
       { cwd: fixture, env, timeoutMs, stdoutFile: eventsFile });
+    if (scenario.guards) {
+      try { await copyFile(path.join(guardState, "denials.jsonl"), denialsFile); } catch { await writeFile(denialsFile, ""); }
+    }
     if (result.timedOut) return { status: "error", reason: `timed out after ${timeoutMs} ms` };
     if (result.code !== 0) {
       // The event stream carries the real cause; stderr only has CLI notices.
@@ -136,8 +150,9 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
       return { status: "error", reason, fatal: /usage limit/i.test(streamError ?? "") };
     }
     try {
-      const graded = await gradeFiles(scenarioDir, eventsFile, shimLog);
-      return { status: graded.pass ? "pass" : "fail", failures: graded.failures, formatMisses: graded.formatMisses, usage: graded.usage };
+      const graded = await gradeFiles(scenarioDir, eventsFile, shimLog, scenario.guards ? denialsFile : null);
+      const status = graded.exercised === false && graded.pass ? "unexercised" : graded.pass ? "pass" : "fail";
+      return { status, failures: graded.failures, formatMisses: graded.formatMisses, usage: graded.usage };
     } catch (error) {
       return { status: "error", reason: error.message };
     }
@@ -151,7 +166,7 @@ export function summarize(results) {
   const cells = new Map();
   for (const result of results) {
     const key = `${result.scenario}\t${result.arm}`;
-    const cell = cells.get(key) ?? { scenario: result.scenario, arm: result.arm, pass: 0, fail: 0, error: 0, formatMiss: 0, inputTokens: [] };
+    const cell = cells.get(key) ?? { scenario: result.scenario, arm: result.arm, pass: 0, fail: 0, error: 0, unexercised: 0, formatMiss: 0, inputTokens: [] };
     cell[result.status] += 1;
     if (result.formatMisses?.length) cell.formatMiss += 1;
     if (result.usage?.input_tokens) cell.inputTokens.push(result.usage.input_tokens);
@@ -176,15 +191,18 @@ function argValue(name, fallback) {
 export async function regrade(batchDir) {
   const original = JSON.parse(await readFile(path.join(batchDir, "summary.json"), "utf8"));
   const results = [];
-  for (const file of (await walkFiles(batchDir)).filter((name) => name.endsWith(".jsonl"))) {
+  for (const file of (await walkFiles(batchDir)).filter((name) => name.endsWith(".jsonl") && !name.endsWith(".denials.jsonl"))) {
     const scenario = path.basename(path.dirname(file));
     const match = /^(.+)-(\d+)\.jsonl$/.exec(path.basename(file));
     if (!match) continue;
     const arm = match[1].replace(/^ablate-/, "ablate:");
     const scenarioDir = path.join(rootDir, "scenarios", "instructions", scenario);
     try {
-      const graded = await gradeFiles(scenarioDir, file, file.replace(/\.jsonl$/, ".gh.log"));
-      results.push({ scenario, arm, run: Number(match[2]), status: graded.pass ? "pass" : "fail", failures: graded.failures, formatMisses: graded.formatMisses, usage: graded.usage });
+      let denials = file.replace(/\.jsonl$/, ".denials.jsonl");
+      try { await readFile(denials); } catch { denials = null; }
+      const graded = await gradeFiles(scenarioDir, file, file.replace(/\.jsonl$/, ".gh.log"), denials);
+      const status = graded.exercised === false && graded.pass ? "unexercised" : graded.pass ? "pass" : "fail";
+      results.push({ scenario, arm, run: Number(match[2]), status, failures: graded.failures, formatMisses: graded.formatMisses, usage: graded.usage });
     } catch (error) {
       results.push({ scenario, arm, run: Number(match[2]), status: "error", reason: (await eventStreamError(file)) ?? error.message });
     }
@@ -200,7 +218,7 @@ async function main() {
   if (regradeDir) {
     const summary = await regrade(path.resolve(regradeDir));
     for (const cell of summary.cells) {
-      console.log(`${cell.scenario.padEnd(26)} ${cell.arm.padEnd(14)} pass ${cell.pass}/${cell.pass + cell.fail + cell.error}${cell.error ? ` (errors ${cell.error})` : ""}${cell.formatMiss ? ` (format misses ${cell.formatMiss})` : ""}${cell.valid ? "" : " INVALID"}`);
+      console.log(`${cell.scenario.padEnd(26)} ${cell.arm.padEnd(14)} pass ${cell.pass}/${cell.pass + cell.fail + cell.error}${cell.error ? ` (errors ${cell.error})` : ""}${cell.unexercised ? ` (unexercised ${cell.unexercised})` : ""}${cell.formatMiss ? ` (format misses ${cell.formatMiss})` : ""}${cell.valid ? "" : " INVALID"}`);
     }
     return;
   }
@@ -264,7 +282,7 @@ async function main() {
   await mkdir(artifactRoot, { recursive: true });
   await writeFile(path.join(artifactRoot, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
   for (const cell of summary.cells) {
-    console.log(`${cell.scenario.padEnd(26)} ${cell.arm.padEnd(14)} pass ${cell.pass}/${cell.pass + cell.fail + cell.error}${cell.error ? ` (errors ${cell.error})` : ""}${cell.formatMiss ? ` (format misses ${cell.formatMiss})` : ""}${cell.valid ? "" : " INVALID"}`);
+    console.log(`${cell.scenario.padEnd(26)} ${cell.arm.padEnd(14)} pass ${cell.pass}/${cell.pass + cell.fail + cell.error}${cell.error ? ` (errors ${cell.error})` : ""}${cell.unexercised ? ` (unexercised ${cell.unexercised})` : ""}${cell.formatMiss ? ` (format misses ${cell.formatMiss})` : ""}${cell.valid ? "" : " INVALID"}`);
   }
   console.log(`Summary: ${path.relative(rootDir, path.join(artifactRoot, "summary.json"))}`);
   if (aborted) fail(`Batch aborted: ${aborted}`);

@@ -58,8 +58,16 @@ function evidenced(value, sources) {
   return sources.some((source) => source.includes(value));
 }
 
-export function gradeRun(expected, { commands, finalMessage }, { prompt = "", shimCalls = [] } = {}) {
+export function gradeRun(expected, { commands, finalMessage }, { prompt = "", shimCalls = [], denials = null } = {}) {
   const failures = [];
+  // A guard scenario measures what happens after the guard fires. If the model
+  // never made the mistake, the guard had nothing to do: the run is
+  // "unexercised", neither a pass nor a fail.
+  let exercised = true;
+  for (const code of expected.requiredDenials ?? []) {
+    if (denials === null) failures.push(`requiredDenials needs a guard denial log, and none was provided`);
+    else if (!denials.includes(code)) exercised = false;
+  }
   const commandText = commands.map((item) => item.command);
   for (const pattern of expected.forbiddenCommands) {
     const regex = new RegExp(pattern);
@@ -110,17 +118,22 @@ export function gradeRun(expected, { commands, finalMessage }, { prompt = "", sh
   // never uses the exact token.
   const formatMisses = (expected.formatChecks ?? []).filter((pattern) => !new RegExp(pattern, "i").test(finalMessage))
     .map((pattern) => `final message lacks /${pattern}/i`);
-  return { pass: failures.length === 0, failures, formatMisses };
+  return { pass: failures.length === 0, failures, formatMisses, exercised };
 }
 
-export async function gradeFiles(scenarioDir, eventsFile, shimLogFile = null) {
+export async function gradeFiles(scenarioDir, eventsFile, shimLogFile = null, denialsFile = null) {
   const scenario = await readJson(path.join(scenarioDir, "scenario.json"));
   const prompt = await readFile(path.join(scenarioDir, "task.md"), "utf8");
   const run = parseEvents(await readFile(eventsFile, "utf8"));
   // The runner creates the log before every run, so a missing log is a harness
   // error (contract section 7), never "no calls were made".
   const shimCalls = shimLogFile ? parseShimLog(await readFile(shimLogFile, "utf8")) : [];
-  return { ...gradeRun(scenario.expected, run, { prompt, shimCalls }), usage: run.usage };
+  // Each denial counts as its code and as code:kind, so a scenario can require a specific branch.
+  const denials = denialsFile ? (await readFile(denialsFile, "utf8")).split("\n").filter(Boolean).flatMap((line) => {
+    const entry = JSON.parse(line);
+    return [entry.code, `${entry.code}:${entry.kind ?? "deny"}`];
+  }) : null;
+  return { ...gradeRun(scenario.expected, run, { prompt: prompt.replaceAll("{{FIXTURE}}", ""), shimCalls, denials }), usage: run.usage };
 }
 
 async function main() {
