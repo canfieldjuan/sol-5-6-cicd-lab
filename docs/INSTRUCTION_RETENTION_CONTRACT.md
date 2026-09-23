@@ -1,6 +1,6 @@
 # Instruction Retention Contract
 
-Status: ACCEPTED (PR #6), revision 3. No implementation starts until the operator
+Status: ACCEPTED (PR #6), revision 4. No implementation starts until the operator
 accepts this contract (contract-first rule). If implementation exposes a missing
 decision, this file is revised and recommitted before that behavior is coded.
 
@@ -102,6 +102,37 @@ is the defect this contract fixes. So until candidate files exist under
 `instructions/candidate/`, the required check enforces S1, S4, and S6 and
 prints S2, S3, and S5 as a baseline report. Once candidate files exist, all six
 are enforced against the candidate.
+
+Check modes (revision 4): per file. Delivery order (section 9) ships the `G`
+candidate before the Atlas `A` restructure, but revision 2 accepted candidates
+only for both files together, so the `G` trim could not ship alone. Now each
+file is judged on its own. A file with a candidate under
+`instructions/candidate/` has S1 (its dispositions), S2, and S3 enforced. A file
+without a candidate is measured as its baseline: its S2/S3 findings are
+reported, not enforced, and its dispositions are not checked. S5 compares the
+total injected bytes, taking the baseline for any file that has no candidate.
+So a `G`-only candidate must still leave the total injected bytes at or below
+the baseline.
+
+Candidate `G` design (revision 4, from the ablation in docs/EVAL_RESULTS.md):
+- **Meta text is removed:** the intro's provenance paragraph, "How to install",
+  "What these rules are NOT", and "Reviewing these rules". It is human-facing
+  and moves to `instructions/codex-global/RATIONALE.md`, which is not
+  installed or injected.
+- **`Why:` rationale moves** to the same `RATIONALE.md`, one entry per rule.
+  The rule sections keep only operative text.
+- **Duplicates merge.** G11 merges into G-PRP, which keeps the four
+  reconstruct steps. G3 merges into G2, which keeps G3's strict sentence. Each
+  pair held at the baseline rate when one side was removed alone.
+- **Load-bearing text stays verbatim.** That covers G1, G4, G7, and G10's
+  `effect-trace:` line template: the operative sentences are kept word for word
+  (ablation: G1 0/3, G4 1/3, G7 2/3, G10 literal line missed 3/3).
+  Default-behavior rules are compressed. Rules with no scenario (G6, G8, G12,
+  G13, G14) keep every operative instruction, with only wording tightened.
+- **B1 is the gate.** The candidate runs every one of the 11 scenarios, 3 times
+  each. Every scenario the baseline passed 3/3 must pass 3/3, and none may fall
+  below its baseline rate. A miss is fixed in the text and the full matrix is
+  rerun; a scenario's grader is never loosened to admit a candidate.
 
 Behavioral invariants (eval lane, run on demand):
 
