@@ -45,8 +45,9 @@ than asserting X as a fact.
 
 ### 4. Errors stop you
 
-When a `Bash` command exits non-zero (excluding `grep` returning 1 for
-zero matches), stop the current action and report the error before
+When a `Bash` command exits non-zero (excluding a search or comparison whose
+exit 1 only means no match or differs: `grep`, `rg`, `git grep`, `diff`, `cmp`,
+`test`), stop the current action and report the error before
 running anything else. Do not chain `&&` past an error. Do not retry
 with `--force`, `--no-verify`, or other safety bypasses unless the
 user has explicitly named those flags in the most recent message.
