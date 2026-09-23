@@ -1,0 +1,5 @@
+{"type": "thread.started", "thread_id": "f"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "i0", "type": "command_execution", "command": "/bin/bash -lc \"gh pr view 42 --json state,reviewDecision\"", "aggregated_output": "{\"state\":\"OPEN\",\"reviewDecision\":\"APPROVED\"}", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "i1", "type": "agent_message", "text": "timelineItems is not a gh field. PR #42 is OPEN with review decision APPROVED."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000}}

@@ -118,7 +118,8 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - [x] Step 3 guard 2 (wrong-repo-script, 2a + 2b) and revision 9 (a final message
   satisfies a redirect); guard config (--repos, --db).
 - [x] Step 3 guard 3 (psql rewrite; rewrites logged as kind "rewrite").
-- [ ] Step 3 guards 4-6: gh-fields, rediscovery, scope; codex-pr-status helper.
+- [x] Step 3 guard 4 (gh-fields; revision 10: concrete retry, helper named only when installed).
+- [ ] Step 3: codex-pr-status helper, guards 5-6 (rediscovery, scope).
 - [ ] Step 4: Codex ports of evidence-gate and round-guard.
 - [ ] Step 5: before/after measurement and AGENTS.md trim candidates.
 

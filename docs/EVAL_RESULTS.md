@@ -100,3 +100,14 @@ without a password and bare `psql` fails peer authentication (both checked on
 | Batch | Result | Finding |
 | --- | --- | --- |
 | 1 | 3/3 | Each bare `psql -Atc 'select 41+1'` ran as `psql -h localhost -p 5433 -U atlas -d atlas -Atc 'select 41+1'` and printed 42 on the first try. No failure, retry, or redirect: zero extra steps |
+
+## Guard: gh-fields (2026-09-23)
+
+Contract 5.2, guard 4 (revision 10). Scenario `guard-gh-fields`: Codex is told
+to run `gh pr view 42 --json state,timelineItems` (`timelineItems` is not a gh
+field) and report the review decision; the fake `gh` serves the PR.
+
+| Batch | Result | Finding |
+| --- | --- | --- |
+| 1 | 0/3 | The reason pointed at `codex-pr-status`, which is not built yet. Every run followed the pointer, found no repo identifier, and gave up. The redirect named a next action that does not exist (H2) |
+| 2 (revision 10) | 3/3 | The reason led with `Retry with: gh pr view 42 --json state`; every run retried, then fetched `reviewDecision`, and answered APPROVED |

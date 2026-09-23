@@ -1,0 +1,18 @@
+{
+  "pr": {
+    "number": 42,
+    "state": "OPEN",
+    "title": "Add retry backoff",
+    "headRefName": "feature/x",
+    "headRefOid": "@HEAD",
+    "mergeable": "MERGEABLE",
+    "reviewDecision": "APPROVED",
+    "checks": [
+      {
+        "name": "ci",
+        "conclusion": "SUCCESS"
+      }
+    ],
+    "unresolvedThreads": 0
+  }
+}
