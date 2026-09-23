@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 7; section 5.2 accepted (PR #13), amended in revision 7. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 8; section 5.2 accepted (PR #13), amended in revisions 7-8. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -226,6 +226,11 @@ re-run on every upgrade before guards are trusted.
   plus `workdir`, which the PreToolUse branch must skip, and then giving up. Q9
   proves the failure is observable after the fact, so guard 1b closes that gap.) Existing entries
   (git-guard, evidence-gate, round-guard, compaction-digest) are untouched.
+- **Guard config** (revision 8): `<guard state dir>/config.json`, written by
+  the installer from `--repos a,b` (known repo roots) and `--db
+  host:port:user:db` (the psql rewrite target). A guard whose config is absent
+  does nothing. The config lives beside the state, not in the hash-manifested
+  install dir, because it is per-machine.
 - **Per-session state**: `~/.local/state/sol-lab/guards/<session_id>.json`
   holds pending redirects and a heartbeat.
 - **Stop backstop (H1b)**: if any redirect is pending and `stop_hook_active` is
@@ -245,6 +250,7 @@ re-run on every upgrade before guards are trusted.
 | 1 | read-path | A read-only command (`cat`, `sed -n`, `head`, `tail`, `nl`, `ls`, `rg`/`grep` path arguments) names a path that does not exist, whose base is known, with no file-creating segment earlier in the same command; or an `apply_patch` `*** Update File:` / `*** Delete File:` whose absolute path does not exist | Deny + Stop backstop. The reason lists up to 5 existing candidates: same basename under the nearest existing ancestor, via `git ls-files` or a bounded directory listing | a later call that reads an existing path in that directory tree |
 | 1b | read-path, after failure (revision 7) | PostToolUse where a read command's own error line (`cat\|sed\|head\|tail\|nl\|ls\|wc\|rg\|grep: <path>: No such file or directory`, `can't read`, `cannot access`) proves a path is missing. This covers relative paths, whose base the PreToolUse branch cannot know | PostToolUse `additionalContext` with candidates (a relative path is searched from the session cwd and labeled that way), plus a pending redirect enforced by the Stop backstop. Never a deny: the failure has already happened | same as 1 |
 | 2 | wrong-repo-script | `bash\|sh scripts/X` or `./scripts/X` with a known base where `<base>/scripts/X` does not exist | Deny + Stop backstop. The reason lists `<base>/scripts/` and the known repos where X exists | a later call that runs an existing script, or none |
+| 2b | wrong-repo-script, after failure (revision 8) | PostToolUse where the shell's own error line (`bash\|sh: [line N: ]scripts/X: No such file or directory`, also `./scripts/X`) proves the script is missing. In all 34 recorded wrong-repo runs the model set `workdir` to another repo, which the PreToolUse branch cannot see (Q7), so this is the branch that covers them | `additionalContext`: the known repos (from the guard config) that do have `scripts/X`, plus a pending redirect for the Stop backstop | a later call that names one of those repos, or a later command that no longer runs `scripts/X` |
 | 3 | psql | `psql` with no `-h`/`--host`, no `PGHOST=` prefix, and no connection URI, when `db.json` (installer-written) defines the target | **Rewrite** (H1a) to add `-h <host> -p <port> -U <user>`, and `-d <db>` if absent. With no `db.json`: no action | n/a |
 | 4 | gh-fields | `gh pr view` / `gh issue view` with `--json` naming a field outside gh's own list (captured at install from gh's error output) | Deny + Stop backstop. The reason lists the valid fields and names `codex-pr-status` | a later `gh` call that passes the check |
 | 5 | rediscovery | `find` rooted at `~`, `/`, `/media`, `/tmp`, or `~/Desktop` without `-maxdepth` of 2 or less | PostToolUse `additionalContext` with the known-repo map (`repos.json`). Never a deny: a sweep does not fail (H3) | n/a |
