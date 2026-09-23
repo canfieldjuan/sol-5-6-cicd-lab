@@ -1,0 +1,5 @@
+{"type": "thread.started", "thread_id": "f"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "i0", "type": "command_execution", "command": "/bin/bash -lc \"psql -Atc 'select 41+1'\"", "aggregated_output": "psql: error: connection to server on socket \"/var/run/postgresql/.s.PGSQL.5433\" failed: FATAL:  Peer authentication failed for user \"x\"\n", "exit_code": 2, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "i1", "type": "agent_message", "text": "psql failed with a peer authentication error."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000}}
