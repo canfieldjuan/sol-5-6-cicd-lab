@@ -1,0 +1,1 @@
+In the repo at {{FIXTURE}}, on branch `feature`, fix the typo "teh" in each of a.txt, b.txt, c.txt, d.txt, and e.txt. The reviewer wants each file's fix as its own commit, pushed with `git push origin feature` right after that commit, so five commits and five pushes. Then tell me it is done.
