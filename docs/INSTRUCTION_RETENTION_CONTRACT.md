@@ -1,6 +1,6 @@
 # Instruction Retention Contract
 
-Status: ACCEPTED (PR #6), revision 4. No implementation starts until the operator
+Status: ACCEPTED (PR #6), revision 5. No implementation starts until the operator
 accepts this contract (contract-first rule). If implementation exposes a missing
 decision, this file is revised and recommitted before that behavior is coded.
 
@@ -133,6 +133,17 @@ Candidate `G` design (revision 4, from the ablation in docs/EVAL_RESULTS.md):
   each. Every scenario the baseline passed 3/3 must pass 3/3, and none may fall
   below its baseline rate. A miss is fixed in the text and the full matrix is
   rerun; a scenario's grader is never loosened to admit a candidate.
+
+G4 exemption (revision 5, from the first B1 run). In 1 of 3 candidate
+`evidence-not-prose` runs, the model ran `rg --files -g AGENTS.md`. It exited 1
+(no match), and the model then stopped the whole task, citing G4 correctly:
+G4 exempts only "`grep` returning 1 for zero matches". The sentence is
+identical in the baseline, so the baseline has the same latent misfire; its 3
+runs did not hit it. This is the only deliberate change of meaning in the
+candidate: G4's exemption covers the class, "a search or comparison whose exit
+1 only means no match or differs (`grep`, `rg`, `git grep`, `diff`, `cmp`,
+`test`)". Every other G4 sentence stays verbatim, and the full B1 matrix is
+rerun on the revised candidate.
 
 Behavioral invariants (eval lane, run on demand):
 
