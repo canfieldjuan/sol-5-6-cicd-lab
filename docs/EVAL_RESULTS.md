@@ -57,3 +57,18 @@ Findings:
 - **Grader defects found by real runs** (all fixed, each real transcript kept as a
   regression fixture that fails on the pre-fix grader): a read-only
   `git apply --check` was forbidden; a `change.patch:N` citation was rejected.
+
+## Guard: read-path (2026-09-23)
+
+Contract `docs/TOOL_FAILURE_MITIGATION_CONTRACT.md` 5.2, guards 1 and 1b.
+`gpt-6-sol` / high, guards installed into the isolated eval profile (trust
+bypassed for that run only). Each batch was re-graded with the final graders;
+"unexercised" means the model never made the mistake, so the guard had nothing
+to do. Unexercised runs are neither a pass nor a fail.
+
+| Batch | Scenario | Result | What it showed |
+| --- | --- | --- | --- |
+| 1 | `guard-read-path` (PreToolUse branch only) | 2/3 | Run 2 rewrote the absolute path as a relative one plus `workdir` (hooks cannot see workdir), the read failed, and the model gave up. This led to revision 7 (guard 1b) |
+| 2 | `guard-read-path` (with 1b) | 3/3 | Deny on the absolute path; the model read `setup-guide.md` and reported the token |
+| 3 | `guard-read-path-relative` | 3/3 | The after-failure branch fired every run, but the Stop backstop also fired after the model had already fixed the path (the pending redirect stored absolute paths; the fix was relative). Wasted steps |
+| 4 | `guard-read-path-relative` (satisfaction fix) | 2/2, 1 unexercised | No redundant backstop and no duplicate reads. The unexercised run listed `docs/` first and never failed a read |

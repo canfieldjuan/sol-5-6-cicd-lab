@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 6 (section 5.2, the step-3 spec, awaits operator acceptance). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 7; section 5.2 accepted (PR #13), amended in revision 7. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -192,10 +192,12 @@ made that day (artifacts under the ignored `artifacts/hook-probe/`).
 | Q7 hook sees the command's working directory | **No.** `tool_input` is only `{command}`, and hook `cwd` is the session directory, not the `workdir` the model passed | workdir run: the model ran `pwd` in `.../sub`, the output was `.../sub`, and the hook saw only the session cwd |
 | Q8 PreToolUse for a missing working directory | Fires, but carries no workdir. No PostToolUse follows the CreateProcess failure | badwd run: hook log and rollout |
 
+| Q9 PostToolUse for a command that exits nonzero | Fires, and `tool_response` carries the command's output including its error line (for example `cat: no-such-file.txt: No such file or directory`); there is no exit code field | postfail run: hook log |
+
 codex-cli upgraded from 0.155.1 to 0.156.0 during this work. The probe is
 re-run on every upgrade before guards are trusted.
 
-## 5.2 Step-3 guard specification (revision 6; awaits operator acceptance)
+## 5.2 Step-3 guard specification (revision 6; accepted in PR #13)
 
 ### Constraints from the probe
 
@@ -219,7 +221,10 @@ re-run on every upgrade before guards are trusted.
   `install-codex-global.mjs`: dry run by default, hash-guarded, backups and
   state under `~/.local/state/sol-lab/`.
 - It is registered by adding entries to `~/.codex/hooks.json` for PreToolUse
-  (matcher `*`), PostToolUse (matcher `*`), and Stop. Existing entries
+  (matcher `*`), PostToolUse (matcher `*`), and Stop. (Revision 7: the live
+  read-path eval showed the model rewriting an absolute path as a relative one
+  plus `workdir`, which the PreToolUse branch must skip, and then giving up. Q9
+  proves the failure is observable after the fact, so guard 1b closes that gap.) Existing entries
   (git-guard, evidence-gate, round-guard, compaction-digest) are untouched.
 - **Per-session state**: `~/.local/state/sol-lab/guards/<session_id>.json`
   holds pending redirects and a heartbeat.
@@ -238,6 +243,7 @@ re-run on every upgrade before guards are trusted.
 | # | Guard | Trigger (all conditions) | Action | Pending redirect cleared by |
 |---|---|---|---|---|
 | 1 | read-path | A read-only command (`cat`, `sed -n`, `head`, `tail`, `nl`, `ls`, `rg`/`grep` path arguments) names a path that does not exist, whose base is known, with no file-creating segment earlier in the same command; or an `apply_patch` `*** Update File:` / `*** Delete File:` whose absolute path does not exist | Deny + Stop backstop. The reason lists up to 5 existing candidates: same basename under the nearest existing ancestor, via `git ls-files` or a bounded directory listing | a later call that reads an existing path in that directory tree |
+| 1b | read-path, after failure (revision 7) | PostToolUse where a read command's own error line (`cat\|sed\|head\|tail\|nl\|ls\|wc\|rg\|grep: <path>: No such file or directory`, `can't read`, `cannot access`) proves a path is missing. This covers relative paths, whose base the PreToolUse branch cannot know | PostToolUse `additionalContext` with candidates (a relative path is searched from the session cwd and labeled that way), plus a pending redirect enforced by the Stop backstop. Never a deny: the failure has already happened | same as 1 |
 | 2 | wrong-repo-script | `bash\|sh scripts/X` or `./scripts/X` with a known base where `<base>/scripts/X` does not exist | Deny + Stop backstop. The reason lists `<base>/scripts/` and the known repos where X exists | a later call that runs an existing script, or none |
 | 3 | psql | `psql` with no `-h`/`--host`, no `PGHOST=` prefix, and no connection URI, when `db.json` (installer-written) defines the target | **Rewrite** (H1a) to add `-h <host> -p <port> -U <user>`, and `-d <db>` if absent. With no `db.json`: no action | n/a |
 | 4 | gh-fields | `gh pr view` / `gh issue view` with `--json` naming a field outside gh's own list (captured at install from gh's error output) | Deny + Stop backstop. The reason lists the valid fields and names `codex-pr-status` | a later `gh` call that passes the check |

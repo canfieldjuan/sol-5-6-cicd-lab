@@ -106,6 +106,13 @@ test("Q7/Q8 report whether a hook can see the working directory and whether it f
   assert.equal(byId(evaluate(base), "Q7"), undefined);
 });
 
+test("Q9 reports whether PostToolUse carries a failing command's error text", () => {
+  const base = { main: goodMain(), deny: goodMain(), rewrite: run(), trust: run() };
+  const withText = { hookEvents: [{ hook_event_name: "PostToolUse", tool_input: { command: "cat no-such-file.txt" }, tool_response: "cat: no-such-file.txt: No such file or directory" }] };
+  assert.equal(byId(evaluate({ ...base, postfail: withText }), "Q9").verdict, "yes");
+  assert.equal(byId(evaluate({ ...base, postfail: { hookEvents: [] } }), "Q9").verdict, "no");
+});
+
 test("the probe config registers PreToolUse and PostToolUse for every tool, and Stop", () => {
   const config = hooksJson("node hook.mjs");
   assert.equal(config.hooks.PreToolUse[0].matcher, "*");

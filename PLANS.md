@@ -113,7 +113,10 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - [x] Step 1: analyzer with fixtures; Jul-Sep baseline in docs/TOOL_FAILURE_BASELINE.md.
 - [x] Step 2: live hook probe (codex-cli 0.156.0). Deny refuses 7/7 but is followed
   3/7; Stop block acted on 11/11; rewrite 4/4; untrusted hooks silently skipped.
-- [ ] Step 3: guards and helpers in the ranked order.
+- [x] Step 3 guard 1 (read-path, with the 1b after-failure branch): guard program,
+  installer, status check, live evals (docs/EVAL_RESULTS.md).
+- [ ] Step 3 guards 2-6: wrong-repo-script, psql rewrite, gh-fields, rediscovery,
+  scope; codex-pr-status helper.
 - [ ] Step 4: Codex ports of evidence-gate and round-guard.
 - [ ] Step 5: before/after measurement and AGENTS.md trim candidates.
 

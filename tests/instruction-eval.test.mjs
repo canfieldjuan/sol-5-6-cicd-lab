@@ -24,13 +24,16 @@ test("every instruction scenario grader is proven: pass*.jsonl fixtures pass, fa
   assert.ok(ids.length >= 11);
   for (const id of ids) {
     const dir = path.join(scenariosDir, id);
-    const fixtures = (await readdir(path.join(dir, "fixtures"))).filter((name) => name.endsWith(".jsonl"));
+    const fixtures = (await readdir(path.join(dir, "fixtures"))).filter((name) => name.endsWith(".jsonl") && !name.endsWith(".denials.jsonl"));
     assert.ok(fixtures.includes("pass.jsonl") && fixtures.includes("fail.jsonl"), id);
     for (const name of fixtures) {
       const logFile = path.join(dir, "fixtures", name.replace(/\.jsonl$/, ".gh.log"));
       let log = null;
       try { await readFile(logFile); log = logFile; } catch {}
-      const result = await gradeFiles(dir, path.join(dir, "fixtures", name), log);
+      const denialsFile = path.join(dir, "fixtures", name.replace(/\.jsonl$/, ".denials.jsonl"));
+      let denials = null;
+      try { await readFile(denialsFile); denials = denialsFile; } catch {}
+      const result = await gradeFiles(dir, path.join(dir, "fixtures", name), log, denials);
       if (name.startsWith("pass")) assert.equal(result.pass, true, `${id}/${name}: ${result.failures.join("; ")}`);
       else assert.equal(result.pass, false, `${id}/${name} unexpectedly passed`);
     }
@@ -143,6 +146,13 @@ test("format misses are counted per cell without changing pass/fail", () => {
   assert.equal(cell.formatMiss, 1);
 });
 
+test("unexercised runs are counted apart from pass and fail", () => {
+  const [cell] = summarize([{ scenario: "s", arm: "a", status: "pass" }, { scenario: "s", arm: "a", status: "unexercised" }]);
+  assert.equal(cell.pass, 1);
+  assert.equal(cell.unexercised, 1);
+  assert.equal(cell.fail, 0);
+});
+
 test("a cell with more than one harness error is invalid", () => {
   const cells = summarize([
     { scenario: "s", arm: "baseline", status: "pass", usage: { input_tokens: 5 } },
@@ -166,6 +176,8 @@ fs.writeFileSync(process.env.FAKE_OBS, JSON.stringify({
   agentsSha: require("node:crypto").createHash("sha256").update(fs.readFileSync(path.join(home, "AGENTS.md"))).digest("hex"),
   config: fs.readFileSync(path.join(home, "config.toml"), "utf8"),
   authIsLink: fs.lstatSync(auth).isSymbolicLink(), authTarget: fs.readlinkSync(auth),
+  hooks: fs.existsSync(path.join(home, "hooks.json")) ? JSON.parse(fs.readFileSync(path.join(home, "hooks.json"), "utf8")) : null,
+  guardState: process.env.SOL_LAB_GUARD_STATE || null,
   home: process.env.HOME, cwd: process.cwd(), ghOnPath: process.env.PATH.split(":")[0],
   args: process.argv.slice(2)
 }));
@@ -289,6 +301,63 @@ test("regrade re-scores saved streams with current graders and keeps errors as e
     assert.equal(cell.error, 1);
     assert.match(summary.gradedByCommit, /^[0-9a-f]{40}$/);
   } finally { await rm(batch, { recursive: true, force: true }); }
+});
+
+test("requiredDenials: passes with the guard's denial, fails without it, and fails with no log", () => {
+  const expected = { forbiddenCommands: [], requiredCommands: [], forbiddenOutputs: [], afterFailure: null, finalMessage: { mustMatch: [], mustNotMatch: [] }, formatChecks: [], shimCalls: { required: [], forbidden: [] }, evidenceBackedValues: false, requiredDenials: ["read-path"] };
+  const run = { commands: [], finalMessage: "" };
+  assert.equal(gradeRun(expected, run, { denials: ["read-path"] }).pass, true);
+  const clean = gradeRun(expected, run, { denials: [] });
+  assert.equal(clean.pass, true, "no failure is invented when the guard had nothing to do");
+  assert.equal(clean.exercised, false);
+  assert.equal(gradeRun({ ...expected, finalMessage: { mustMatch: ["TOKEN"], mustNotMatch: [] } }, run, { denials: [] }).pass, false, "a real failure still fails when unexercised");
+  assert.equal(gradeRun({ ...expected, requiredDenials: ["read-path:after-failure"] }, run, { denials: ["read-path", "read-path:deny"] }).exercised, false);
+  assert.equal(gradeRun({ ...expected, requiredDenials: ["read-path:after-failure"] }, run, { denials: ["read-path", "read-path:after-failure"] }).pass, true);
+  assert.match(gradeRun(expected, run, {}).failures.join(), /needs a guard denial log/);
+});
+
+test("runner with guards: hooks.json in the eval profile, trust bypass for that run only, {{FIXTURE}} substituted", async () => {
+  const fx = await fakeSetup("ok", path.join(scenarioDir, "fixtures", "pass.jsonl"));
+  const guarded = path.join(fx.root, "guarded");
+  try {
+    await cp(scenarioDir, guarded, { recursive: true });
+    const manifest = JSON.parse(await readFile(path.join(guarded, "scenario.json"), "utf8"));
+    await writeFile(path.join(guarded, "scenario.json"), JSON.stringify({ ...manifest, guards: true }));
+    await writeFile(path.join(guarded, "task.md"), "Read {{FIXTURE}}/docs/x.md");
+    await runOne({ scenarioDir: guarded, armText, stateRoot: fx.stateRoot, codexBin: fx.bin, model: "m", effort: "high", timeoutMs: 20000, artifactBase: fx.artifactBase, authPath: fx.authPath });
+    const obs = JSON.parse(await readFile(fx.obs, "utf8"));
+    assert.match(obs.hooks.hooks.PreToolUse[0].hooks[0].command, /hooks\/codex-guards\/guard\.mjs/);
+    assert.ok(obs.hooks.hooks.Stop);
+    assert.ok(obs.args.includes("--dangerously-bypass-hook-trust"));
+    assert.equal(obs.args.at(-1), `Read ${obs.cwd}/docs/x.md`);
+    assert.ok(obs.guardState.startsWith(fx.stateRoot));
+    await readFile(`${fx.artifactBase}.denials.jsonl`, "utf8"); // copied (empty) even when nothing was denied
+  } finally { await rm(fx.root, { recursive: true, force: true }); }
+});
+
+test("runner without guards: no hooks.json and no trust bypass", async () => {
+  const fx = await fakeSetup("ok", path.join(scenarioDir, "fixtures", "pass.jsonl"));
+  try {
+    await runOne({ scenarioDir, armText, stateRoot: fx.stateRoot, codexBin: fx.bin, model: "m", effort: "high", timeoutMs: 20000, artifactBase: fx.artifactBase, authPath: fx.authPath });
+    const obs = JSON.parse(await readFile(fx.obs, "utf8"));
+    assert.equal(obs.hooks, null);
+    assert.ok(!obs.args.includes("--dangerously-bypass-hook-trust"));
+  } finally { await rm(fx.root, { recursive: true, force: true }); }
+});
+
+test("the validator requires guards: true for requiredDenials", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "scen-"));
+  try {
+    const dir = path.join(root, "instructions", "needs-guards");
+    await cp(scenarioDir, dir, { recursive: true });
+    const manifest = JSON.parse(await readFile(path.join(dir, "scenario.json"), "utf8"));
+    manifest.id = "needs-guards";
+    manifest.expected.requiredDenials = ["read-path"];
+    await writeFile(path.join(dir, "scenario.json"), JSON.stringify(manifest));
+    assert.match((await validateScenario(path.join(dir, "scenario.json"))).join("\n"), /requiredDenials needs "guards": true/);
+    await writeFile(path.join(dir, "scenario.json"), JSON.stringify({ ...manifest, guards: true }));
+    assert.deepEqual(await validateScenario(path.join(dir, "scenario.json")), []);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 // gh shim

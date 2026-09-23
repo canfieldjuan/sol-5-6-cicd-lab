@@ -12,7 +12,8 @@ export async function validateScenario(file) {
   const directory = path.dirname(file);
   const lane = path.basename(path.dirname(directory));
   const folderId = path.basename(directory);
-  assertExactKeys(scenario, ["schemaVersion", "id", "lane", "description", "expected"], ["$schema"], folderId, errors);
+  assertExactKeys(scenario, ["schemaVersion", "id", "lane", "description", "expected"], ["$schema", "guards"], folderId, errors);
+  if ("guards" in scenario && typeof scenario.guards !== "boolean") errors.push(`${folderId}.guards must be boolean`);
   if (scenario.schemaVersion !== 1) errors.push(`${folderId}.schemaVersion must be 1`);
   if (!/^[a-z][a-z0-9-]*$/.test(scenario.id ?? "")) errors.push(`${folderId}.id is invalid`);
   if (scenario.id !== folderId) errors.push(`${folderId}.id must match its directory`);
@@ -59,7 +60,7 @@ export async function validateScenario(file) {
   if (scenario.lane === "instructions") {
     const expected = scenario.expected;
     assertExactKeys(expected,
-      ["rules", "forbiddenCommands", "requiredCommands", "forbiddenOutputs", "afterFailure", "finalMessage", "formatChecks", "shimCalls", "evidenceBackedValues"], [],
+      ["rules", "forbiddenCommands", "requiredCommands", "forbiddenOutputs", "afterFailure", "finalMessage", "formatChecks", "shimCalls", "evidenceBackedValues"], ["requiredDenials"],
       `${folderId}.expected`, errors);
     const inventory = await readJson(path.join(rootDir, "instructions", "rule-inventory.json"));
     const globalRules = new Set(inventory.rules.filter((rule) => rule.file === "G").map((rule) => rule.id));
@@ -86,6 +87,10 @@ export async function validateScenario(file) {
       try { new RegExp(pattern); } catch { errors.push(`${folderId}: pattern /${pattern}/ does not compile`); }
     }
     if (typeof expected?.evidenceBackedValues !== "boolean") errors.push(`${folderId}.expected.evidenceBackedValues must be boolean`);
+    if ("requiredDenials" in (expected ?? {})) {
+      if (!stringArray(expected.requiredDenials)) errors.push(`${folderId}.expected.requiredDenials must be a string array`);
+      if (!scenario.guards) errors.push(`${folderId}.expected.requiredDenials needs "guards": true`);
+    }
     for (const required of ["task.md", "setup.sh", "fixtures/pass.jsonl", "fixtures/fail.jsonl"]) {
       try { await access(path.join(directory, required)); } catch { errors.push(`${folderId} is missing ${required}`); }
     }

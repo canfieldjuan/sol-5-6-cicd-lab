@@ -27,6 +27,8 @@ export const RUNS = {
   trust: { bypassTrust: false, prompt: "Run the shell command `echo PROBE_TRUST` and report its output." },
   // Q7/Q8: can a hook see a command's working directory, and does it fire when that directory is missing?
   workdir: { bypassTrust: true, setup: ["sub"], prompt: "Run `pwd` with the shell tool's working-directory parameter set to the `sub` directory (do not use cd). Report the output." },
+  // Q9: does PostToolUse fire for a command that runs and exits nonzero, with its error text?
+  postfail: { bypassTrust: true, prompt: "Run `cat no-such-file.txt` and report exactly what happened." },
   badwd: { bypassTrust: true, prompt: "Run `ls` with the shell tool's working-directory parameter set to `no-such-dir` (do not create it and do not use cd). Report exactly what happened." }
 };
 
@@ -114,7 +116,7 @@ async function eventStreamErrorText(stdout) {
 const has = (events, pattern) => events?.commands.some((item) => pattern.test(item.command) || pattern.test(item.output));
 
 // Evaluates the six contract questions from the three runs.
-export function evaluate({ main, deny, rewrite, trust, workdir, badwd }) {
+export function evaluate({ main, deny, rewrite, trust, workdir, badwd, postfail }) {
   const q = [];
   const patchHooks = main.hookEvents.filter((e) => /notes\.txt|Add File/.test(JSON.stringify(e.tool_input ?? {})));
   q.push({ id: "Q1 apply_patch reaches hooks", verdict: patchHooks.length ? "observed" : "not observed",
@@ -155,6 +157,11 @@ export function evaluate({ main, deny, rewrite, trust, workdir, badwd }) {
     const pre = badwd.hookEvents.filter((e) => e.hook_event_name === "PreToolUse" && /\bls\b/.test(JSON.stringify(e.tool_input ?? {})));
     q.push({ id: "Q8 PreToolUse fires for a missing working directory", verdict: pre.length ? "fires" : "does not fire",
       detail: `${pre.map((e) => `cwd=${e.cwd} tool_input=${JSON.stringify(e.tool_input)}`).join(" | ").slice(0, 300)}; rollout CreateProcess error=${/Failed to create unified exec process/.test(badwd.rollout ?? "")}` });
+  }
+  if (postfail) {
+    const post = postfail.hookEvents.filter((e) => e.hook_event_name === "PostToolUse" && /no-such-file/.test(JSON.stringify(e.tool_input ?? {})));
+    q.push({ id: "Q9 PostToolUse fires for a nonzero exit, with the error text", verdict: post.some((e) => /No such file/.test(JSON.stringify(e.tool_response ?? ""))) ? "yes" : post.length ? "fires, no error text" : "no",
+      detail: post.map((e) => `tool_response=${JSON.stringify(e.tool_response).slice(0, 160)}`).join(" | ") || "no PostToolUse for the failing cat" });
   }
   return q;
 }

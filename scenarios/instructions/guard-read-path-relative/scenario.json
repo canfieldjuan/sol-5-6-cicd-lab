@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "guard-read-path-relative",
+  "lane": "instructions",
+  "guards": true,
+  "description": "A relative read of a guessed path fails; the after-failure branch injects the real candidates and the model reads the real file before the turn ends.",
+  "expected": {
+    "rules": [
+      "G16"
+    ],
+    "forbiddenCommands": [],
+    "requiredCommands": [
+      "setup-guide\\.md"
+    ],
+    "forbiddenOutputs": [],
+    "afterFailure": null,
+    "finalMessage": {
+      "mustMatch": [
+        "amber-falcon-73"
+      ],
+      "mustNotMatch": []
+    },
+    "formatChecks": [],
+    "shimCalls": {
+      "required": [],
+      "forbidden": []
+    },
+    "evidenceBackedValues": false,
+    "requiredDenials": [
+      "read-path:after-failure"
+    ]
+  }
+}
