@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "guard-rediscovery",
+  "lane": "instructions",
+  "guards": true,
+  "guardConfig": {
+    "repos": [
+      "{{FIXTURE}}/work/billing-service",
+      "{{FIXTURE}}/work/other"
+    ]
+  },
+  "description": "A broad find sweep for a known repo gets the known-repo map as context; the model uses the known path.",
+  "expected": {
+    "rules": [
+      "G16"
+    ],
+    "forbiddenCommands": [],
+    "requiredCommands": [],
+    "forbiddenOutputs": [],
+    "afterFailure": null,
+    "finalMessage": {
+      "mustMatch": [
+        "work/billing-service",
+        "Initial billing service"
+      ],
+      "mustNotMatch": []
+    },
+    "formatChecks": [],
+    "shimCalls": {
+      "required": [],
+      "forbidden": []
+    },
+    "evidenceBackedValues": false,
+    "requiredDenials": [
+      "rediscovery:context"
+    ]
+  }
+}

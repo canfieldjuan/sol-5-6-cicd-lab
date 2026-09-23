@@ -118,3 +118,21 @@ Real GitHub runs (no model involved), 2026-09-23:
 - `--repo canfieldjuan/sol-5-6-cicd-lab --pr 17`: MERGED, 1/1 checks pass, 0 required, 0 unresolved threads.
 - `--repo canfieldjuan/ATLAS --pr 2532`: MERGED, 10 required checks (8 pass, 1 fail), 2 unresolved threads, in one call.
 - Bad arguments: `{"error": "usage: ..."}` on stderr, exit 2.
+
+## Guard: rediscovery (2026-09-23)
+
+Contract 5.2, guard 5 (revision 11). Scenario `guard-rediscovery`: find a
+`billing-service` repo "searching from the home directory". The eval `HOME` is
+an empty isolated directory, so the known-repo map is the useful signal.
+"Sweeps" counts `find` / `os.walk` / `locate` commands.
+
+| Batch | Result (re-graded) | Commands per run | Sweeps per run | Finding |
+| --- | --- | --- | --- | --- |
+| Hint after the sweep (PostToolUse) | 3/3 correct answers | 9, 7, 7 | 4, 4, 4 | The hint arrived too late. It missed `find "$HOME"` (variables are unreadable to the shell reader), and one run launched a whole-disk Python walk after the hint |
+| Hint before the sweep (revision 11, Q10) | 3/3 | **3, 3, 2** | **1, 1, 1** | About 60-70% fewer steps per incident, same correctness |
+
+Isolation note: in the first batch two runs swept the operator's real
+`/home/juan-canfield`, because the eval isolates `HOME` and `CODEX_HOME` but
+not the filesystem. Eval runs use `danger-full-access` (the host's AppArmor
+policy breaks bwrap), so they are not sandboxed; scenarios must stay read-only
+outside their fixture.

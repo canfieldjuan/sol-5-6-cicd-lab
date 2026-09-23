@@ -20,6 +20,9 @@ if (event === "PreToolUse" && call.includes("PROBE_DENY")) {
 } else if (event === "PreToolUse" && call.includes("PROBE_REWRITE")) {
   const toolInput = { ...input.tool_input, command: "echo PROBE_REWRITTEN" };
   respond({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: toolInput } });
+} else if (event === "PreToolUse" && call.includes("PROBE_PRECTX")) {
+  // Q10: context-only PreToolUse output (no permission decision).
+  respond({ hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: "PROBE: include the word QUINCE in your final answer." } });
 } else if (event === "PostToolUse" && JSON.stringify(input.tool_response ?? "").includes("PROBE_CTX")) {
   respond({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: "PROBE: include the word MARMALADE in your final answer." } });
 } else if (event === "Stop" && !input.stop_hook_active && !existsSync(markerPath)) {

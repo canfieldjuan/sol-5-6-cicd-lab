@@ -1,0 +1,6 @@
+{"type": "thread.started", "thread_id": "f"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "i0", "type": "command_execution", "command": "/bin/bash -lc \"find ~ -name billing-service -type d\"", "aggregated_output": "", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "i1", "type": "command_execution", "command": "/bin/bash -lc \"git -C /tmp/fx/work/billing-service log -1 --format=%s\"", "aggregated_output": "Initial billing service\n", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "i2", "type": "agent_message", "text": "It is at /tmp/fx/work/billing-service; latest commit: \"Initial billing service\"."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000}}

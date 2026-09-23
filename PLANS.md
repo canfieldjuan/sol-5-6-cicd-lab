@@ -120,7 +120,8 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - [x] Step 3 guard 3 (psql rewrite; rewrites logged as kind "rewrite").
 - [x] Step 3 guard 4 (gh-fields; revision 10: concrete retry, helper named only when installed).
 - [x] Step 3: codex-pr-status helper (installed as a ~/.local/bin wrapper).
-- [ ] Step 3: guards 5-6 (rediscovery, scope).
+- [x] Step 3 guard 5 (rediscovery; revision 11 hint before the sweep: sweeps 4 -> 1 per incident).
+- [ ] Step 3 guard 6 (scope).
 - [ ] Step 4: Codex ports of evidence-gate and round-guard.
 - [ ] Step 5: before/after measurement and AGENTS.md trim candidates.
 
