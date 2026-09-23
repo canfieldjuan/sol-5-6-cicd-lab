@@ -12,7 +12,8 @@ export async function validateScenario(file) {
   const directory = path.dirname(file);
   const lane = path.basename(path.dirname(directory));
   const folderId = path.basename(directory);
-  assertExactKeys(scenario, ["schemaVersion", "id", "lane", "description", "expected"], ["$schema", "guards"], folderId, errors);
+  assertExactKeys(scenario, ["schemaVersion", "id", "lane", "description", "expected"], ["$schema", "guards", "guardConfig"], folderId, errors);
+  if ("guardConfig" in scenario && !scenario.guards) errors.push(`${folderId}.guardConfig needs "guards": true`);
   if ("guards" in scenario && typeof scenario.guards !== "boolean") errors.push(`${folderId}.guards must be boolean`);
   if (scenario.schemaVersion !== 1) errors.push(`${folderId}.schemaVersion must be 1`);
   if (!/^[a-z][a-z0-9-]*$/.test(scenario.id ?? "")) errors.push(`${folderId}.id is invalid`);

@@ -5,10 +5,12 @@
 import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { checkReadFailure, checkReadPath, satisfiesReadPath } from "./guards/read-path.mjs";
+import { answeredReadPath, checkReadFailure, checkReadPath, satisfiesReadPath } from "./guards/read-path.mjs";
+import { answeredWrongRepoScript, checkWrongRepoFailure, checkWrongRepoScript, satisfiesWrongRepoScript } from "./guards/wrong-repo-script.mjs";
 
 export const GUARDS = [
-  { code: "read-path", check: checkReadPath, after: checkReadFailure, satisfied: satisfiesReadPath }
+  { code: "read-path", check: checkReadPath, after: checkReadFailure, satisfied: satisfiesReadPath, answered: answeredReadPath },
+  { code: "wrong-repo-script", check: checkWrongRepoScript, after: checkWrongRepoFailure, satisfied: satisfiesWrongRepoScript, answered: answeredWrongRepoScript }
 ];
 
 export function stateDir(env = process.env) {
@@ -28,7 +30,7 @@ function writeJsonAtomic(file, value) {
 const sessionFile = (dir, sessionId) => path.join(dir, `session-${String(sessionId || "unknown").replace(/[^\w.-]/g, "_")}.json`);
 
 // Pure decision function: returns { output, state } for one hook event.
-export function decide(input, state, { home = os.homedir(), guards = GUARDS } = {}) {
+export function decide(input, state, { home = os.homedir(), guards = GUARDS, config = {} } = {}) {
   const event = input.hook_event_name;
   const pending = [...(state.pending ?? [])];
   const command = typeof input.tool_input?.command === "string" ? input.tool_input.command : "";
@@ -40,7 +42,7 @@ export function decide(input, state, { home = os.homedir(), guards = GUARDS } = 
       return !(guard?.satisfied && guard.satisfied(item, command));
     });
     for (const guard of guards) {
-      const finding = guard.check({ toolName: input.tool_name, command, home, cwd: input.cwd });
+      const finding = guard.check({ toolName: input.tool_name, command, home, cwd: input.cwd, config });
       if (!finding) continue;
       if (finding.action === "rewrite") {
         return { output: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, command: finding.command } } }, state: { pending: remaining } };
@@ -57,9 +59,9 @@ export function decide(input, state, { home = os.homedir(), guards = GUARDS } = 
   if (event === "PostToolUse") {
     // After-failure branches (contract revision 7): context + pending redirect.
     for (const guard of guards) {
-      const finding = guard.after?.({ toolName: input.tool_name, command, response: input.tool_response, cwd: input.cwd, home });
+      const finding = guard.after?.({ toolName: input.tool_name, command, response: input.tool_response, cwd: input.cwd, home, config });
       if (!finding) continue;
-      const duplicate = pending.some((item) => item.code === finding.code && item.dir === finding.pending.dir);
+      const duplicate = pending.some((item) => item.code === finding.code && JSON.stringify(item.dir ?? item.script) === JSON.stringify(finding.pending.dir ?? finding.pending.script));
       return {
         output: { hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: finding.reason } },
         state: { pending: duplicate ? pending : [...pending, { ...finding.pending, reason: finding.reason }] },
@@ -71,8 +73,13 @@ export function decide(input, state, { home = os.homedir(), guards = GUARDS } = 
 
   if (event === "Stop") {
     // H1b backstop: block once while redirects are pending; never twice.
-    if (pending.length && !input.stop_hook_active) {
-      const reasons = pending.map((item) => item.reason).join("\n\n");
+    // Revision 9: a redirect the final message already acts on is resolved.
+    const open = pending.filter((item) => {
+      const guard = guards.find((candidate) => candidate.code === item.code);
+      return !(guard?.answered && guard.answered(item, input.last_assistant_message));
+    });
+    if (open.length && !input.stop_hook_active) {
+      const reasons = open.map((item) => item.reason).join("\n\n");
       return { output: { decision: "block", reason: `Before finishing, act on the guard redirect(s) below; they were blocked, not resolved.\n\n${reasons}` }, state: { pending: [] } };
     }
     return { output: null, state: { pending: [] } };
@@ -87,7 +94,9 @@ export function run(rawInput, env = process.env) {
   const input = JSON.parse(rawInput || "{}");
   writeJsonAtomic(path.join(dir, "heartbeat.json"), { at: new Date().toISOString(), event: input.hook_event_name ?? null, session: input.session_id ?? null });
   const file = sessionFile(dir, input.session_id);
-  const { output, state, denied, redirected } = decide(input, readJson(file, { pending: [] }), { home: env.HOME || os.homedir() });
+  // Per-machine guard config (contract revision 8); absent config = those guards do nothing.
+  const config = readJson(path.join(dir, "config.json"), {});
+  const { output, state, denied, redirected } = decide(input, readJson(file, { pending: [] }), { home: env.HOME || os.homedir(), config });
   writeJsonAtomic(file, state);
   if (denied || redirected) {
     appendFileSync(path.join(dir, "denials.jsonl"), JSON.stringify({ at: new Date().toISOString(), session: input.session_id ?? null, code: denied ?? redirected, kind: denied ? "deny" : "after-failure" }) + "\n");

@@ -114,6 +114,10 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
       const command = `node '${path.join(rootDir, "hooks", "codex-guards", "guard.mjs")}'`;
       const entry = (matcher) => ({ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: 10 }] });
       await writeFile(path.join(codexHome, "hooks.json"), JSON.stringify({ hooks: { PreToolUse: [entry("*")], PostToolUse: [entry("*")], Stop: [entry(null)] } }, null, 2));
+      if (scenario.guardConfig) {
+        await mkdir(guardState, { recursive: true });
+        await writeFile(path.join(guardState, "config.json"), JSON.stringify(scenario.guardConfig).replaceAll("{{FIXTURE}}", fixture));
+      }
     }
     await copyFile(path.join(rootDir, "scripts", "shims", "gh.mjs"), path.join(bin, "gh"));
     await chmod(path.join(bin, "gh"), 0o755);

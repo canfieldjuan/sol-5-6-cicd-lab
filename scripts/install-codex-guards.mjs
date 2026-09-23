@@ -63,7 +63,20 @@ async function writeAtomic(file, content, stateDir) {
   await rename(temporary, file);
 }
 
-export async function install({ source, installDir, hooksJson, stateDir, apply = false, now = new Date() }) {
+// Per-machine guard config (contract revision 8): repos for wrong-repo-script,
+// db for the psql rewrite. Written beside the guard state, not manifested.
+export function guardConfig({ repos = [], db = null }) {
+  const config = {};
+  if (repos.length) config.repos = repos.map((repo) => path.resolve(repo));
+  if (db) {
+    const [host, port, user, database] = db.split(":");
+    if (!host || !/^\d+$/.test(port ?? "") || !user || !database) throw new Error("--db must be host:port:user:db");
+    config.db = { host, port: Number(port), user, database };
+  }
+  return config;
+}
+
+export async function install({ source, installDir, hooksJson, stateDir, apply = false, now = new Date(), config = null }) {
   await mkdir(stateDir, { recursive: true });
   const lockPath = path.join(stateDir, "guards-install.lock");
   let lock;
@@ -113,6 +126,10 @@ export async function install({ source, installDir, hooksJson, stateDir, apply =
       }
       await writeAtomic(hooksJson, JSON.stringify(merged, null, 2) + "\n", stateDir);
     }
+    if (config && Object.keys(config).length) {
+      await mkdir(path.join(stateDir, "guards"), { recursive: true });
+      await writeAtomic(path.join(stateDir, "guards", "config.json"), JSON.stringify(config, null, 2) + "\n", stateDir);
+    }
     const nextState = { files: manifest, installedAt: now.toISOString(), guardCommand };
     await writeAtomic(statePath, JSON.stringify(nextState, null, 2) + "\n", stateDir);
     return { ...plan, applied: true, backup };
@@ -124,8 +141,11 @@ export async function install({ source, installDir, hooksJson, stateDir, apply =
 
 async function main() {
   const apply = process.argv.includes("--apply");
+  const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; };
+  const config = guardConfig({ repos: (arg("--repos") ?? "").split(",").filter(Boolean), db: arg("--db") ?? null });
   const paths = defaultPaths();
-  const result = await install({ ...paths, apply });
+  const result = await install({ ...paths, apply, config });
+  if (Object.keys(config).length) console.log(`guard config: ${JSON.stringify(config)}`);
   console.log(`${apply ? "installed" : "dry run"}: ${result.files.length} guard files -> ${paths.installDir}`);
   console.log(`hooks.json ${result.hooksChanged ? (apply ? "updated (guard entries appended)" : "would gain guard entries") : "already has the guard entries"}: ${paths.hooksJson}`);
   if (result.backup) console.log(`backup: ${result.backup}`);

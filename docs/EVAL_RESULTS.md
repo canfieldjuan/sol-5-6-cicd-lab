@@ -72,3 +72,20 @@ to do. Unexercised runs are neither a pass nor a fail.
 | 2 | `guard-read-path` (with 1b) | 3/3 | Deny on the absolute path; the model read `setup-guide.md` and reported the token |
 | 3 | `guard-read-path-relative` | 3/3 | The after-failure branch fired every run, but the Stop backstop also fired after the model had already fixed the path (the pending redirect stored absolute paths; the fix was relative). Wasted steps |
 | 4 | `guard-read-path-relative` (satisfaction fix) | 2/2, 1 unexercised | No redundant backstop and no duplicate reads. The unexercised run listed `docs/` first and never failed a read |
+
+## Guard: wrong-repo-script (2026-09-23)
+
+Contract 5.2, guard 2 (2b after-failure, revision 8), and revision 9 (a final
+message can satisfy a redirect). Scenario `guard-wrong-repo-script`: Codex is
+asked to run `scripts/open_pr.sh` in an `app` repo that lacks it (the
+`atlas` repo has it), with `workdir` set to `app`. This is the shape of all 34
+recorded wrong-repo runs.
+
+| Batch | Result | Agent messages per run | Finding |
+| --- | --- | --- | --- |
+| Before revision 9 | 3/3 | 3, 3, 3 | Correct every time (no Atlas script run against `app`), but the Stop backstop forced a redundant message after the model had already answered: a wasted full-context step |
+| After revision 9 | 3/3 | 2, 2, 2 | The final answer satisfies the redirect; no redundant step |
+
+Re-check of `guard-read-path-relative` after revision 9: 1/1 pass and 2
+unexercised (the model listed the directory first). The 3-message runs are
+ordinary narration, not the backstop.
