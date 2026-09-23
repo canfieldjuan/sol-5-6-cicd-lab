@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 14; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) proposed in revision 14. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 16; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-16. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -292,7 +292,7 @@ unresolved threads. It is built from the verified queries in
 - `analyze-tool-failures.mjs` on post-install sessions reports the class delta
   (step 5).
 
-## 5.3 Step-4 specification: Codex ports of the Stop gates (revision 14; proposed)
+## 5.3 Step-4 specification: Codex ports of the Stop gates (revision 14; accepted in PR #21)
 
 ### Reproduction (2026-09-23)
 
@@ -411,6 +411,77 @@ Codex rollout facts, from 40 recent rollouts:
 
   Each is graded on the block firing and the model acting on it before the turn
   ends. The fixture remote is a local bare repo, so nothing leaves the machine.
+
+### Replay findings (revision 15)
+
+The first replay of 20 native rollouts (173 turns, 19 blocks) was reviewed
+block by block. Three deliberate changes came out of it. Each one is a named
+divergence from the Claude original, and the parity test asserts it
+separately:
+- **Sub-agent reports are evidence.** In the owner's rollout,
+  `response_item/agent_message` rows are reports from spawned agents (author
+  `/root/<child>`, recipient `/root`; outbound instructions are `spawn_agent` /
+  `send_message` calls). The Claude original counts a sub-agent's result, a
+  `tool_result`, as evidence. Without this change, a commit SHA that a
+  sub-agent reported and the parent relayed was flagged (5 tokens in one
+  turn).
+- **`#N passed` is not a count.** "DocSum PR #90 passed its review gate" was
+  flagged as the test count "90 passed", with "gate" supplying the test
+  context. A number directly preceded by `#` is an identifier. The Claude
+  original has the same false positive. It stays untouched (H6), and the fix
+  is offered there as a follow-up.
+- **`HEAD` and bare pushes are keyed by working directory.** The original
+  counts every `git push origin HEAD` in one `HEAD` bucket, and every push
+  without a refspec in one `<current-branch>` bucket. Codex drives many repos
+  from one session, so those buckets mixed unrelated work: one session fired
+  tier 5 on five pushes across four repositories, and another's bucket held 34
+  pushes from five working directories. Codex records a `workdir` on every
+  `exec_command`, so such a push is keyed by that directory, or by a leading
+  `cd <dir> &&` in the command, and the reason names the directory. A push with
+  neither falls back to the original's bucket. A push with a named branch is
+  keyed by name, as before.
+
+Unchanged and inherited, noted but not fixed: evidence matching is a substring
+match, so "26 failed" is backed by an unrelated "Exact 26 failed nodes" line in
+the same turn. This is the same looseness as the original, on the side of
+not blocking.
+
+### Live findings (revision 16)
+
+In the live `stop-round` eval, the round guard fired in 1 of the first 3 runs,
+and in 0 of 3 once the runner kept each run's rollout. Every run pushed 5
+times. Reproduced offline on the kept rollouts, where the reader found 0-1
+pushes:
+- **Pushes run from loops.** The model wrote
+  `for (const cmd of ["git add ...", "git commit ...", "git push origin feature"]) await tools.exec_command({cmd, workdir})`.
+  `cmd` is shorthand for a variable, so the script source has no command
+  literal to read. Reading commands from source cannot follow loops, arrays,
+  or template strings.
+- **Codex records what actually ran.** Newer rollouts carry one
+  `event_msg/item_completed` row per execution with `item.type:
+  "CommandExecution"`, the argv (`["/bin/bash", "-lc", "<command>"]`), and the
+  real `cwd` (a `file://` URL). All 5 pushes are there. Round counting
+  therefore uses these rows whenever a session has any, and falls back to the
+  source literals only for sessions without them (12 of the 40 surveyed
+  rollouts have them). The script of a `-c`/`-lc` shell argv is the command;
+  any other argv is joined with spaces.
+- **Text is not a push.** The same run appended a session-ledger line after
+  each push, `printf '... git push origin feature ...' >> .codex/SESSION_LEDGER.md`
+  (global rule 12 makes such writes routine). The original counts any command
+  that *contains* "git push", which would double the count. A push now counts
+  only when `git` is at a command position (the start, or after `&&`, `||`,
+  `;`, `|`, or a newline, after any `VAR=value` prefixes), optionally with
+  `-C <dir>`, followed by `push`. The refspec is read from that push, and
+  `-C <dir>` sets the directory the same way a leading `cd` does. This is a
+  fourth named divergence from the Claude original.
+- **Evidence is unchanged.** The evidence gate keeps using the tool outputs
+  the model received (`custom_tool_call_output`), not `CommandExecution`
+  output, which the model sees only if the script printed it.
+
+The eval runner now keeps each guarded run's rollout and the guard's
+`errors.log` as artifacts. A failed run whose required guard never fired now
+says so first ("required guard denial absent"), where before the other
+failures hid it.
 
 ### Behavior change for the operator
 

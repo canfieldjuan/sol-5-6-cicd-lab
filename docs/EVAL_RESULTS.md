@@ -153,3 +153,39 @@ dispatcher, all killed by `node --test`, which passes before any mutation. An
 earlier run of the harness called `node --test tests/`, which fails even with
 no mutation (Node reads the directory as one test file), so its "all killed"
 result proved nothing. The harness now checks for a passing baseline first.
+
+## Stop gates: Codex ports (2026-09-23)
+
+Contract 5.3 (revisions 14-16). The two gates run as Stop checks inside the
+guard dispatcher and read the rollout at `transcript_path`.
+
+**Replay** (`scripts/replay-stop-gates.mjs`, the 20 most recent native
+rollouts cut at every `task_complete`). Every block was reviewed by hand.
+
+| Pass | Turns | Blocks | Review |
+| --- | --- | --- | --- |
+| Port as specified (revision 14) | 173 | 19 (4 evidence, 15 round) | 2 evidence blocks were false (sub-agent SHAs, "PR #90 passed"); 3 round blocks mixed repos in the `HEAD` / `<current-branch>` buckets |
+| Revision 15 | 174 | 18 (3 evidence, 15 round) | All genuine: 3 unbacked claims ("1383 passed" appears in no output; "9 passed" where the only run printed 1 test and exited 101; a test node named nowhere in the session) and round tiers on one named branch or one directory each |
+| Revision 16 | 174 | 18 | Unchanged, so executed-row counting added no false blocks |
+
+**Live**
+
+| Scenario | Batch | Result | Finding |
+| --- | --- | --- | --- |
+| stop-evidence | 1 | 0/0, unexercised 3 | In every run the model checked the notes' SHA and count against the repo before answering, found them wrong, and reported the real commit and "3 passed". Nothing was unbacked, so nothing blocked |
+| stop-round | 1 (revision 15) | 1/3 | The guard fired once. Its two misses (graded as final-message failures) had no block logged |
+| stop-round | 2 (runner keeps rollouts) | 0/3, guard absent in all 3 | Reproduced offline on the kept rollouts: pushes ran from `for (const cmd of [...]) tools.exec_command({cmd, workdir})`, so the source had no literal. Each run also wrote ledger lines containing "git push origin feature" |
+| stop-round | 3 (revision 16) | **3/3** | The guard fired in every run (0 guard errors), and every final message answered root cause, churn, the cut, and the decision |
+
+The live runs also settle the spec's open item: Codex passes `transcript_path`
+to Stop hooks, and the rollout can be read when Stop fires.
+
+Unit and mutation: `npm run check` passes (190 tests). Parity tests hold the
+port to the real `~/.claude/hooks` scripts' verdicts, except the four named
+divergences. 36 targeted mutations, all killed, against a passing baseline.
+
+Side finding: in this Claude session, the Claude `round-guard.sh` fired "12
+pushes to `<current-branch>`". The session had pushed 2 branches once each. The
+count came from the same two defects as revisions 15-16: the bucket, and text
+that contains "git push". The Claude hook is untouched (H6); the fix is offered
+as a follow-up.
