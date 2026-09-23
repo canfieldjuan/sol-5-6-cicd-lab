@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 14; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) proposed in revision 14. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 15; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revision 15. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -292,7 +292,7 @@ unresolved threads. It is built from the verified queries in
 - `analyze-tool-failures.mjs` on post-install sessions reports the class delta
   (step 5).
 
-## 5.3 Step-4 specification: Codex ports of the Stop gates (revision 14; proposed)
+## 5.3 Step-4 specification: Codex ports of the Stop gates (revision 14; accepted in PR #21)
 
 ### Reproduction (2026-09-23)
 
@@ -411,6 +411,40 @@ Codex rollout facts, from 40 recent rollouts:
 
   Each is graded on the block firing and the model acting on it before the turn
   ends. The fixture remote is a local bare repo, so nothing leaves the machine.
+
+### Replay findings (revision 15)
+
+The first replay of 20 native rollouts (173 turns, 19 blocks) was reviewed
+block by block. Three deliberate changes came out of it. Each one is a named
+divergence from the Claude original, and the parity test asserts it
+separately:
+- **Sub-agent reports are evidence.** In the owner's rollout,
+  `response_item/agent_message` rows are reports from spawned agents (author
+  `/root/<child>`, recipient `/root`; outbound instructions are `spawn_agent` /
+  `send_message` calls). The Claude original counts a sub-agent's result, a
+  `tool_result`, as evidence. Without this change, a commit SHA that a
+  sub-agent reported and the parent relayed was flagged (5 tokens in one
+  turn).
+- **`#N passed` is not a count.** "DocSum PR #90 passed its review gate" was
+  flagged as the test count "90 passed", with "gate" supplying the test
+  context. A number directly preceded by `#` is an identifier. The Claude
+  original has the same false positive. It stays untouched (H6), and the fix
+  is offered there as a follow-up.
+- **`HEAD` and bare pushes are keyed by working directory.** The original
+  counts every `git push origin HEAD` in one `HEAD` bucket, and every push
+  without a refspec in one `<current-branch>` bucket. Codex drives many repos
+  from one session, so those buckets mixed unrelated work: one session fired
+  tier 5 on five pushes across four repositories, and another's bucket held 34
+  pushes from five working directories. Codex records a `workdir` on every
+  `exec_command`, so such a push is keyed by that directory, or by a leading
+  `cd <dir> &&` in the command, and the reason names the directory. A push with
+  neither falls back to the original's bucket. A push with a named branch is
+  keyed by name, as before.
+
+Unchanged and inherited, noted but not fixed: evidence matching is a substring
+match, so "26 failed" is backed by an unrelated "Exact 26 failed nodes" line in
+the same turn. This is the same looseness as the original, on the side of
+not blocking.
 
 ### Behavior change for the operator
 
