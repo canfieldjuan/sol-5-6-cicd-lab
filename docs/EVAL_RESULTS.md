@@ -89,3 +89,14 @@ recorded wrong-repo runs.
 Re-check of `guard-read-path-relative` after revision 9: 1/1 pass and 2
 unexercised (the model listed the directory first). The 3-message runs are
 ordinary narration, not the backstop.
+
+## Guard: psql rewrite (2026-09-23)
+
+Contract 5.2, guard 3 (H1a rewrite). Scenario `guard-psql` is **local only**:
+it needs the Atlas Postgres on `localhost:5433`, where TCP as `atlas` works
+without a password and bare `psql` fails peer authentication (both checked on
+2026-09-22).
+
+| Batch | Result | Finding |
+| --- | --- | --- |
+| 1 | 3/3 | Each bare `psql -Atc 'select 41+1'` ran as `psql -h localhost -p 5433 -U atlas -d atlas -Atc 'select 41+1'` and printed 42 on the first try. No failure, retry, or redirect: zero extra steps |

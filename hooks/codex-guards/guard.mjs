@@ -7,10 +7,12 @@ import os from "node:os";
 import path from "node:path";
 import { answeredReadPath, checkReadFailure, checkReadPath, satisfiesReadPath } from "./guards/read-path.mjs";
 import { answeredWrongRepoScript, checkWrongRepoFailure, checkWrongRepoScript, satisfiesWrongRepoScript } from "./guards/wrong-repo-script.mjs";
+import { checkPsql } from "./guards/psql.mjs";
 
 export const GUARDS = [
   { code: "read-path", check: checkReadPath, after: checkReadFailure, satisfied: satisfiesReadPath, answered: answeredReadPath },
-  { code: "wrong-repo-script", check: checkWrongRepoScript, after: checkWrongRepoFailure, satisfied: satisfiesWrongRepoScript, answered: answeredWrongRepoScript }
+  { code: "wrong-repo-script", check: checkWrongRepoScript, after: checkWrongRepoFailure, satisfied: satisfiesWrongRepoScript, answered: answeredWrongRepoScript },
+  { code: "psql", check: checkPsql }
 ];
 
 export function stateDir(env = process.env) {
@@ -45,7 +47,7 @@ export function decide(input, state, { home = os.homedir(), guards = GUARDS, con
       const finding = guard.check({ toolName: input.tool_name, command, home, cwd: input.cwd, config });
       if (!finding) continue;
       if (finding.action === "rewrite") {
-        return { output: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, command: finding.command } } }, state: { pending: remaining } };
+        return { output: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, command: finding.command } } }, state: { pending: remaining }, rewritten: guard.code };
       }
       return {
         output: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: finding.reason } },
@@ -96,10 +98,11 @@ export function run(rawInput, env = process.env) {
   const file = sessionFile(dir, input.session_id);
   // Per-machine guard config (contract revision 8); absent config = those guards do nothing.
   const config = readJson(path.join(dir, "config.json"), {});
-  const { output, state, denied, redirected } = decide(input, readJson(file, { pending: [] }), { home: env.HOME || os.homedir(), config });
+  const { output, state, denied, redirected, rewritten } = decide(input, readJson(file, { pending: [] }), { home: env.HOME || os.homedir(), config });
   writeJsonAtomic(file, state);
-  if (denied || redirected) {
-    appendFileSync(path.join(dir, "denials.jsonl"), JSON.stringify({ at: new Date().toISOString(), session: input.session_id ?? null, code: denied ?? redirected, kind: denied ? "deny" : "after-failure" }) + "\n");
+  if (denied || redirected || rewritten) {
+    const kind = denied ? "deny" : redirected ? "after-failure" : "rewrite";
+    appendFileSync(path.join(dir, "denials.jsonl"), JSON.stringify({ at: new Date().toISOString(), session: input.session_id ?? null, code: denied ?? redirected ?? rewritten, kind }) + "\n");
   }
   return output;
 }

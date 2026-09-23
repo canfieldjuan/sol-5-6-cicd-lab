@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "guard-psql",
+  "lane": "instructions",
+  "guards": true,
+  "guardConfig": {
+    "db": {
+      "host": "localhost",
+      "port": 5433,
+      "user": "atlas",
+      "database": "atlas"
+    }
+  },
+  "description": "LOCAL ONLY (needs the Atlas Postgres on localhost:5433). A bare psql call is rewritten to the TCP atlas connection and succeeds instead of failing peer authentication.",
+  "expected": {
+    "rules": [
+      "G4"
+    ],
+    "forbiddenCommands": [],
+    "requiredCommands": [
+      "psql"
+    ],
+    "forbiddenOutputs": [
+      "Peer authentication failed",
+      "role \"[^\"]+\" does not exist"
+    ],
+    "afterFailure": null,
+    "finalMessage": {
+      "mustMatch": [
+        "\\b42\\b"
+      ],
+      "mustNotMatch": []
+    },
+    "formatChecks": [],
+    "shimCalls": {
+      "required": [],
+      "forbidden": []
+    },
+    "evidenceBackedValues": false,
+    "requiredDenials": [
+      "psql:rewrite"
+    ]
+  }
+}
