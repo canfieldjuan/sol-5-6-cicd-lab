@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 15; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revision 15. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 16; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-16. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -445,6 +445,43 @@ Unchanged and inherited, noted but not fixed: evidence matching is a substring
 match, so "26 failed" is backed by an unrelated "Exact 26 failed nodes" line in
 the same turn. This is the same looseness as the original, on the side of
 not blocking.
+
+### Live findings (revision 16)
+
+In the live `stop-round` eval, the round guard fired in 1 of the first 3 runs,
+and in 0 of 3 once the runner kept each run's rollout. Every run pushed 5
+times. Reproduced offline on the kept rollouts, where the reader found 0-1
+pushes:
+- **Pushes run from loops.** The model wrote
+  `for (const cmd of ["git add ...", "git commit ...", "git push origin feature"]) await tools.exec_command({cmd, workdir})`.
+  `cmd` is shorthand for a variable, so the script source has no command
+  literal to read. Reading commands from source cannot follow loops, arrays,
+  or template strings.
+- **Codex records what actually ran.** Newer rollouts carry one
+  `event_msg/item_completed` row per execution with `item.type:
+  "CommandExecution"`, the argv (`["/bin/bash", "-lc", "<command>"]`), and the
+  real `cwd` (a `file://` URL). All 5 pushes are there. Round counting
+  therefore uses these rows whenever a session has any, and falls back to the
+  source literals only for sessions without them (12 of the 40 surveyed
+  rollouts have them). The script of a `-c`/`-lc` shell argv is the command;
+  any other argv is joined with spaces.
+- **Text is not a push.** The same run appended a session-ledger line after
+  each push, `printf '... git push origin feature ...' >> .codex/SESSION_LEDGER.md`
+  (global rule 12 makes such writes routine). The original counts any command
+  that *contains* "git push", which would double the count. A push now counts
+  only when `git` is at a command position (the start, or after `&&`, `||`,
+  `;`, `|`, or a newline, after any `VAR=value` prefixes), optionally with
+  `-C <dir>`, followed by `push`. The refspec is read from that push, and
+  `-C <dir>` sets the directory the same way a leading `cd` does. This is a
+  fourth named divergence from the Claude original.
+- **Evidence is unchanged.** The evidence gate keeps using the tool outputs
+  the model received (`custom_tool_call_output`), not `CommandExecution`
+  output, which the model sees only if the script printed it.
+
+The eval runner now keeps each guarded run's rollout and the guard's
+`errors.log` as artifacts. A failed run whose required guard never fired now
+says so first ("required guard denial absent"), where before the other
+failures hid it.
 
 ### Behavior change for the operator
 
