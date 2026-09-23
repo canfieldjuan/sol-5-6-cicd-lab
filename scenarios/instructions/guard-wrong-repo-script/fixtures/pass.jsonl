@@ -1,0 +1,5 @@
+{"type": "thread.started", "thread_id": "f"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "i0", "type": "command_execution", "command": "/bin/bash -lc \"bash scripts/open_pr.sh --dry-run\"", "aggregated_output": "bash: scripts/open_pr.sh: No such file or directory\n", "exit_code": 127, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "i1", "type": "agent_message", "text": "The app repo has no scripts/open_pr.sh (that script belongs to the atlas repo). Its README says to open PRs with gh pr create."}}
+{"type": "turn.completed", "usage": {"input_tokens": 27000}}

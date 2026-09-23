@@ -115,8 +115,9 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
   3/7; Stop block acted on 11/11; rewrite 4/4; untrusted hooks silently skipped.
 - [x] Step 3 guard 1 (read-path, with the 1b after-failure branch): guard program,
   installer, status check, live evals (docs/EVAL_RESULTS.md).
-- [ ] Step 3 guards 2-6: wrong-repo-script, psql rewrite, gh-fields, rediscovery,
-  scope; codex-pr-status helper.
+- [x] Step 3 guard 2 (wrong-repo-script, 2a + 2b) and revision 9 (a final message
+  satisfies a redirect); guard config (--repos, --db).
+- [ ] Step 3 guards 3-6: psql rewrite, gh-fields, rediscovery, scope; codex-pr-status helper.
 - [ ] Step 4: Codex ports of evidence-gate and round-guard.
 - [ ] Step 5: before/after measurement and AGENTS.md trim candidates.
 

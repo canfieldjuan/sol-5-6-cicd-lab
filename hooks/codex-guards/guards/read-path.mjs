@@ -93,7 +93,7 @@ function denial(target) {
     action: "deny",
     code: "read-path",
     reason: `[read-path] ${target} does not exist. ${hint} Use one of these paths, or list ${dir} first, instead of guessing.`,
-    pending: { code: "read-path", dir, candidates: found }
+    pending: { code: "read-path", dir, candidates: found, answerNames: [...found.map((file) => path.basename(file)), ...listing] }
   };
 }
 
@@ -148,7 +148,7 @@ export function checkReadFailure({ response, cwd, home }) {
   // A relative redirect is usually resolved with a relative read, so remember
   // the directory in the same form (relative to the session cwd).
   const relDir = relative ? path.relative(cwd, dir) : null;
-  const pending = { code: "read-path", dir, candidates: found };
+  const pending = { code: "read-path", dir, candidates: found, answerNames: [...found.map((file) => path.basename(file)), ...listing] };
   if (relDir && !relDir.startsWith("..")) pending.relDir = relDir;
   // Missing file directly in the session cwd: match the suggested names instead.
   if (relDir === "") pending.names = [...found.map((file) => path.basename(file)), ...listing];
@@ -162,4 +162,11 @@ export function satisfiesReadPath(pending, command) {
   if (pending.candidates.some((file) => text.includes(file)) || text.includes(pending.dir)) return true;
   if (pending.names?.some((name) => new RegExp(`(^|[\\s'"=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`).test(text))) return true;
   return Boolean(pending.relDir) && new RegExp(`(^|[\\s'"=])(\\./)?${pending.relDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`).test(text);
+}
+
+// Revision 9: the final message acts on the redirect when it uses one of the
+// suggested names. Saying the requested file was missing is giving up.
+export function answeredReadPath(pending, message) {
+  const text = String(message ?? "");
+  return (pending.answerNames ?? []).some((name) => name.length > 2 && text.includes(name));
 }
