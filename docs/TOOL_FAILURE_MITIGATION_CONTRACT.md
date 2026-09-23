@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 11; section 5.2 accepted (PR #13), amended in revisions 7-11. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 12; section 5.2 accepted (PR #13), amended in revisions 7-12. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -262,6 +262,12 @@ re-run on every upgrade before guards are trusted.
 | 4 | gh-fields | `gh pr view` / `gh issue view` with `--json` naming a field outside gh's own list (captured at install from gh's error output) | Deny + Stop backstop. The reason leads with a concrete retry (the same command with the invalid fields removed), then lists the valid fields. It names `codex-pr-status` only when that command is on PATH (revision 10: the live eval went 0/3 when the reason pointed at the not-yet-built helper, and 3/3 with the concrete retry) | a later `gh` call that passes the check |
 | 5 | rediscovery | `find` rooted at `~`, `$HOME`, `/`, `/media`, `/tmp`, or `~/Desktop` without `-maxdepth` of 2 or less | PreToolUse context-only output (revision 11; Q10) with the known-repo map from the guard config, so the hint lands before the sweep, not after. The sweep still runs: never a deny, because a sweep does not fail (H3). Revision 11 exists because the live eval showed the after-sweep hint arriving too late (one run launched a whole-disk walk after it) and missing `find "$HOME"` | n/a |
 | 6 | scope | Active only if `<session cwd>/.codex/scope.json` exists (repo roots, allowed globs, PR, goal). Trips on an `apply_patch` target outside the allowed globs, or a `cd` into a directory outside the declared roots | Deny + Stop backstop. The reason names the declared PR/goal and allowed globs. At Stop, `git diff --name-only` in each declared root that shows files outside the globs also blocks (drift) | reverting or confirming out-of-scope changes; or the Stop has fired once |
+
+**Scope guard details (revision 12).**
+- `scope.json` shape: `{"roots": [absolute repo paths], "allow": [globs relative to a root, e.g. "src/api/**"], "pr": N, "goal": "..."}`. A missing or malformed file makes the guard inactive; a malformed one is logged to `errors.log`, never enforced by guessing.
+- A write target inside a declared root must match an `allow` glob. A target inside some other git repository (any ancestor with `.git`) is out of scope. A target in no git repository (scratch files such as `/tmp/pr-body.md`) is allowed.
+- **Drift is measured from session start.** At the first guard event of a session, the guard records each root's already-dirty files (`git status --porcelain`). The Stop check flags only files that became dirty after that and match no `allow` glob, so pre-existing work is never blamed on the session.
+- A scope redirect is answered (revision 9) when the final message names each out-of-scope file, so the operator sees any deliberate out-of-scope change.
 
 `codex-pr-status --repo R --pr N` (installed to `~/.local/bin`) prints JSON
 with state, head SHA, mergeable, required and all checks, reviews, and
