@@ -111,7 +111,8 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 
 - [x] Contract accepted (PR #10); revisions 2-4 from implementation findings.
 - [x] Step 1: analyzer with fixtures; Jul-Sep baseline in docs/TOOL_FAILURE_BASELINE.md.
-- [ ] Step 2: live hook probe.
+- [x] Step 2: live hook probe (codex-cli 0.156.0). Deny refuses 7/7 but is followed
+  3/7; Stop block acted on 11/11; rewrite 4/4; untrusted hooks silently skipped.
 - [ ] Step 3: guards and helpers in the ranked order.
 - [ ] Step 4: Codex ports of evidence-gate and round-guard.
 - [ ] Step 5: before/after measurement and AGENTS.md trim candidates.

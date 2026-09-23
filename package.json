@@ -16,7 +16,8 @@
     "instructions:check": "node scripts/check-instructions.mjs",
     "instructions:install": "node scripts/install-codex-global.mjs",
     "eval:instructions": "node scripts/run-instruction-eval.mjs",
-    "analyze:tool-failures": "node scripts/analyze-tool-failures.mjs"
+    "analyze:tool-failures": "node scripts/analyze-tool-failures.mjs",
+    "probe:hooks": "node scripts/probe-codex-hooks.mjs"
   },
   "engines": {
     "node": ">=20"
