@@ -8,7 +8,7 @@ import {
   checkAtlasReferences, checkBaselineCoverage, checkBudget, checkCandidateDispositions,
   checkMustSee, checkTruncation, parseSections, ruleIdFor, runChecks, sha256, validateInventoryShape
 } from "../scripts/check-instructions.mjs";
-import { decide, install } from "../scripts/install-codex-global.mjs";
+import { decide, defaultPaths, install } from "../scripts/install-codex-global.mjs";
 
 const inventoryPath = path.join(rootDir, "instructions", "rule-inventory.json");
 const loadInventory = async () => structuredClone(await readJson(inventoryPath));
@@ -304,4 +304,39 @@ test("installer refuses to run while another install holds the lock, and keeps t
     assert.equal(await readFile(fx.target, "utf8"), "old baseline\n");
     assert.ok((await readdir(fx.stateDir)).includes("install.lock"));
   } finally { await rm(fx.root, { recursive: true, force: true }); }
+});
+
+test("revision 6: --candidate installs the candidate; the default install rolls it back", async () => {
+  const inventory = await loadInventory();
+  assert.equal(defaultPaths({}, { candidatePath: inventory.candidate.G }).source, path.join(rootDir, inventory.candidate.G));
+  assert.equal(defaultPaths({}).source, path.join(rootDir, "instructions", "codex-global", "AGENTS.md"));
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), "install-candidate-"));
+  try {
+    const baselineSource = path.join(dir, "baseline.md");
+    const candidateSource = path.join(dir, "candidate.md");
+    const target = path.join(dir, "codex", "AGENTS.md");
+    const stateDir = path.join(dir, "state");
+    await writeFile(baselineSource, "baseline\n");
+    await writeFile(candidateSource, "candidate\n");
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, "baseline\n");
+    const baselineHash = sha256(buf("baseline\n"));
+
+    const dry = await install({ source: candidateSource, target, stateDir, baselineHash });
+    assert.equal(dry.applied, false);
+    assert.equal((await readFile(target, "utf8")), "baseline\n", "dry run writes nothing");
+
+    const up = await install({ source: candidateSource, target, stateDir, baselineHash, apply: true });
+    assert.equal(up.applied, true);
+    assert.equal(await readFile(target, "utf8"), "candidate\n");
+    assert.equal(await readFile(up.backup, "utf8"), "baseline\n", "the baseline was backed up");
+
+    const back = await install({ source: baselineSource, target, stateDir, baselineHash, apply: true });
+    assert.equal(back.reason, "target matches the last installed version");
+    assert.equal(await readFile(target, "utf8"), "baseline\n", "rollback restores the baseline");
+
+    await writeFile(target, "hand edit\n");
+    assert.equal((await install({ source: candidateSource, target, stateDir, baselineHash, apply: true })).action, "refuse", "a hand edit still blocks the candidate");
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
