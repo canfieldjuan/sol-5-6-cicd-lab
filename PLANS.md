@@ -94,7 +94,9 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - [x] Rerun the 3 invalid baseline cells (2026-09-23: 3/3 each; all 11 baseline cells valid).
 - [x] Ablation study (2026-09-23, 13 arms / 39 runs): load-bearing G1, G4, G7, and G10's literal line;
   the rest default-behavior (compressible); G-PRP/G11 and G2/G3 each held with its pair present.
-- [ ] Candidate global AGENTS.md; Atlas AGENTS.md restructure PR.
+- [x] Candidate global AGENTS.md (15,903 bytes, 44% smaller; B1 33/33; revision 5 widened G4's no-match exemption).
+- [ ] Install the candidate on the operator's approval (installer `--apply`).
+- [ ] Atlas AGENTS.md restructure PR (phase 2 scenarios).
 
 - 2026-09-22: Baseline injects 61,232 bytes (G 28,464 in full + A's first 32,768
   of 84,233). The baseline report lists 7 must-see Atlas sections and 31 Atlas

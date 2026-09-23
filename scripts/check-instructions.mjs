@@ -109,9 +109,9 @@ export function checkBaselineCoverage(inventory, buffers) {
 
 // S1 against a candidate: kept rules exist, removed and merged rules do not,
 // and every relocated rule leaves its pointer inside the injected window.
-export function checkCandidateDispositions(inventory, buffers) {
+export function checkCandidateDispositions(inventory, buffers, only = files) {
   const errors = [];
-  for (const file of files) {
+  for (const file of only) {
     const sections = sectionMap(file, buffers[file]);
     const window = inventory.windowBytes[file];
     const injected = buffers[file].subarray(0, injectedBytes(buffers[file], window)).toString("utf8");
@@ -130,9 +130,9 @@ export function checkCandidateDispositions(inventory, buffers) {
 }
 
 // S2: must-see rules sit fully inside the injected window.
-export function checkMustSee(inventory, buffers) {
+export function checkMustSee(inventory, buffers, only = files) {
   const findings = [];
-  for (const file of files) {
+  for (const file of only) {
     const window = inventory.windowBytes[file];
     if (window === null) continue;
     const sections = sectionMap(file, buffers[file]);
@@ -147,7 +147,8 @@ export function checkMustSee(inventory, buffers) {
 }
 
 // S3: nothing in A past the window unless it was relocated.
-export function checkTruncation(inventory, buffers) {
+export function checkTruncation(inventory, buffers, only = files) {
+  if (!only.includes("A")) return [];
   const window = inventory.windowBytes.A;
   if (buffers.A.length <= window) return [];
   const byId = new Map(inventory.rules.map((rule) => [rule.id, rule]));
@@ -222,29 +223,29 @@ export async function runChecks(root = rootDir) {
   errors.push(...checkBaselineCoverage(inventory, baseline));
   errors.push(...checkAtlasReferences(inventory.atlasReferences, baseline.A));
 
-  const candidatePaths = files.map((file) => path.join(root, inventory.candidate[file]));
-  const present = await Promise.all(candidatePaths.map(exists));
-  if (present.some(Boolean) && !present.every(Boolean)) {
-    errors.push("candidate files must be added together: both G and A, or neither");
-    return { errors, report };
+  // Revision 4: check modes are per file. A file with a candidate is enforced;
+  // a file without one is measured as its baseline and only reported.
+  const candidate = {};
+  for (const file of files) {
+    const candidatePath = path.join(root, inventory.candidate[file]);
+    if (await exists(candidatePath)) candidate[file] = await readFile(candidatePath);
   }
+  const enforced = files.filter((file) => candidate[file]);
+  const reported = files.filter((file) => !candidate[file]);
+  const effective = Object.fromEntries(files.map((file) => [file, candidate[file] ?? baseline[file]]));
 
-  if (present.every(Boolean)) {
-    const candidate = { G: await readFile(candidatePaths[0]), A: await readFile(candidatePaths[1]) };
-    errors.push(...checkCandidateDispositions(inventory, candidate));
-    errors.push(...checkMustSee(inventory, candidate));
-    errors.push(...checkTruncation(inventory, candidate));
-    errors.push(...checkAtlasReferences(inventory.atlasReferences, candidate.A));
-    const budget = checkBudget(inventory, baseline, candidate);
-    errors.push(...budget.errors);
-    report.push(`candidate injects ${budget.after} bytes (baseline ${budget.before})`);
-  } else {
-    // Baseline mode: S2, S3, and S5 describe the candidate, so they are reported, not enforced.
-    const budget = checkBudget(inventory, baseline, baseline);
-    report.push(`baseline injects ${budget.before} bytes (no candidate yet)`);
-    for (const finding of [...checkMustSee(inventory, baseline), ...checkTruncation(inventory, baseline)]) {
-      report.push(`baseline report: ${finding}`);
-    }
+  errors.push(...checkCandidateDispositions(inventory, effective, enforced));
+  errors.push(...checkMustSee(inventory, effective, enforced));
+  errors.push(...checkTruncation(inventory, effective, enforced));
+  if (candidate.A) errors.push(...checkAtlasReferences(inventory.atlasReferences, candidate.A));
+  const budget = checkBudget(inventory, baseline, effective);
+  errors.push(...budget.errors);
+  report.push(enforced.length
+    ? `candidate injects ${budget.after} bytes (baseline ${budget.before}); candidate files: ${enforced.join(", ")}`
+    : `baseline injects ${budget.before} bytes (no candidate yet)`);
+  // S2, S3, and S5 describe a candidate, so a file without one is reported, not enforced.
+  for (const finding of [...checkMustSee(inventory, baseline, reported), ...checkTruncation(inventory, baseline, reported)]) {
+    report.push(`baseline report: ${finding}`);
   }
   return { errors, report };
 }
