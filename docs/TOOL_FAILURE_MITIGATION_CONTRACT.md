@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 6 (section 5.2, the step-3 spec, awaits operator acceptance). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 6; section 5.2 accepted (PR #13). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -195,7 +195,7 @@ made that day (artifacts under the ignored `artifacts/hook-probe/`).
 codex-cli upgraded from 0.155.1 to 0.156.0 during this work. The probe is
 re-run on every upgrade before guards are trusted.
 
-## 5.2 Step-3 guard specification (revision 6; awaits operator acceptance)
+## 5.2 Step-3 guard specification (revision 6; accepted in PR #13)
 
 ### Constraints from the probe
 
