@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 8; section 5.2 accepted (PR #13), amended in revisions 7-8. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 9; section 5.2 accepted (PR #13), amended in revisions 7-9. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -130,8 +130,13 @@ product code.
   is unaddressed, the Stop hook returns `decision:"block"` with the same reason,
   which continues the turn and was acted on every time it was measured.
   A pending redirect clears when a later call satisfies it (the corrected
-  command runs, or the out-of-scope work is abandoned) or when the Stop hook
-  has already fired for it once (`stop_hook_active`), so a turn cannot loop.
+  command runs, or the out-of-scope work is abandoned), when the model's final
+  message already acts on it (revision 9: the Stop input carries
+  `last_assistant_message`; each guard defines what "acts on" means, and giving
+  up does not count), or when the Stop hook has already fired for it once
+  (`stop_hook_active`), so a turn cannot loop. Revision 9 exists because the
+  live wrong-repo-script eval showed the backstop forcing a redundant final
+  message in 3 of 3 runs: the model had already given the correct answer.
 - **H2 Actionable reason.** Every reason names the correct next action: the
   existing path, the right command, the helper to use, or the declared scope. A
   reason that only names the violation fails review.
