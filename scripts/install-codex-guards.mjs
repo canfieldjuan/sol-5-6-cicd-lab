@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fail, isMain, rootDir } from "./lib.mjs";
@@ -25,7 +25,8 @@ export function defaultPaths(env = process.env) {
     source: path.join(rootDir, "hooks", "codex-guards"),
     installDir: path.join(codexHome, "hooks", "lab-guards"),
     hooksJson: path.join(codexHome, "hooks.json"),
-    stateDir: path.join(stateHome, "sol-lab")
+    stateDir: path.join(stateHome, "sol-lab"),
+    binDir: path.join(home, ".local", "bin")
   };
 }
 
@@ -93,7 +94,9 @@ export function captureGhFields(run = (args) => spawnSync("gh", args, { encoding
   return fields;
 }
 
-export async function install({ source, installDir, hooksJson, stateDir, apply = false, now = new Date(), config = null }) {
+export const wrapperFor = (installDir) => `#!/bin/sh\n# Installed by sol-5-6-cicd-lab scripts/install-codex-guards.mjs\nexec node '${path.join(installDir, "bin", "codex-pr-status.mjs")}' "$@"\n`;
+
+export async function install({ source, installDir, hooksJson, stateDir, binDir = null, apply = false, now = new Date(), config = null }) {
   await mkdir(stateDir, { recursive: true });
   const lockPath = path.join(stateDir, "guards-install.lock");
   let lock;
@@ -113,6 +116,15 @@ export async function install({ source, installDir, hooksJson, stateDir, apply =
       if (!expected) throw new Error(`${path.join(installDir, rel)} exists but was not installed by this script; move it aside first`);
       if (sha(installed) !== expected && sha(installed) !== sha(await readFile(path.join(source, rel)))) {
         throw new Error(`${path.join(installDir, rel)} was edited by hand since the last install; fold the edit into ${path.join(source, rel)} first`);
+      }
+    }
+    // codex-pr-status wrapper on PATH: refuse to overwrite a file this script did not write.
+    const wrapperPath = binDir ? path.join(binDir, "codex-pr-status") : null;
+    const wrapper = wrapperFor(installDir);
+    if (wrapperPath) {
+      const existingWrapper = await readOptional(wrapperPath);
+      if (existingWrapper !== null && sha(existingWrapper) !== sha(Buffer.from(wrapper)) && sha(existingWrapper) !== state.wrapper?.sha) {
+        throw new Error(`${wrapperPath} exists and was not written by this script; move it aside first`);
       }
     }
     const rawHooks = await readOptional(hooksJson);
@@ -147,7 +159,14 @@ export async function install({ source, installDir, hooksJson, stateDir, apply =
       await mkdir(path.join(stateDir, "guards"), { recursive: true });
       await writeAtomic(path.join(stateDir, "guards", "config.json"), JSON.stringify(config, null, 2) + "\n", stateDir);
     }
-    const nextState = { files: manifest, installedAt: now.toISOString(), guardCommand };
+    let wrapperState = null;
+    if (wrapperPath) {
+      await mkdir(binDir, { recursive: true });
+      await writeAtomic(wrapperPath, wrapper, stateDir);
+      await chmod(wrapperPath, 0o755);
+      wrapperState = { path: wrapperPath, sha: sha(Buffer.from(wrapper)) };
+    }
+    const nextState = { files: manifest, installedAt: now.toISOString(), guardCommand, wrapper: wrapperState };
     await writeAtomic(statePath, JSON.stringify(nextState, null, 2) + "\n", stateDir);
     return { ...plan, applied: true, backup };
   } finally {
@@ -168,6 +187,7 @@ async function main() {
   console.log(`${apply ? "installed" : "dry run"}: ${result.files.length} guard files -> ${paths.installDir}`);
   console.log(`hooks.json ${result.hooksChanged ? (apply ? "updated (guard entries appended)" : "would gain guard entries") : "already has the guard entries"}: ${paths.hooksJson}`);
   if (result.backup) console.log(`backup: ${result.backup}`);
+  console.log(`codex-pr-status -> ${path.join(paths.binDir, "codex-pr-status")}`);
   if (!apply) return console.log("pass --apply to install");
   console.log("\nThe guards are installed but NOT active until trusted (Codex silently skips untrusted hooks):");
   console.log("  1. Open `codex` (the TUI), run /hooks, and trust the lab-guards entries.");

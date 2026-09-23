@@ -19,6 +19,11 @@ export async function status({ installDir, hooksJson, stateDir }) {
     try { content = await readFile(path.join(installDir, rel)); } catch { return { status: "broken", detail: `${rel} is missing from ${installDir}` }; }
     if (sha(content) !== hash) return { status: "broken", detail: `${rel} differs from the installed version` };
   }
+  if (state.wrapper) {
+    let content;
+    try { content = await readFile(state.wrapper.path); } catch { return { status: "broken", detail: `${state.wrapper.path} is missing` }; }
+    if (sha(content) !== state.wrapper.sha) return { status: "broken", detail: `${state.wrapper.path} differs from the installed version` };
+  }
   const hooks = await json(hooksJson);
   const registered = ["PreToolUse", "PostToolUse", "Stop"].every((event) => (hooks?.hooks?.[event] ?? []).some((group) => (group.hooks ?? []).some((hook) => hook.command === state.guardCommand)));
   if (!registered) return { status: "broken", detail: `${hooksJson} lacks the guard entries` };

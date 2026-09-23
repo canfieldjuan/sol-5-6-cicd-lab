@@ -111,3 +111,10 @@ field) and report the review decision; the fake `gh` serves the PR.
 | --- | --- | --- |
 | 1 | 0/3 | The reason pointed at `codex-pr-status`, which is not built yet. Every run followed the pointer, found no repo identifier, and gave up. The redirect named a next action that does not exist (H2) |
 | 2 (revision 10) | 3/3 | The reason led with `Retry with: gh pr view 42 --json state`; every run retried, then fetched `reviewDecision`, and answered APPROVED |
+
+## Helper: codex-pr-status (2026-09-23)
+
+Real GitHub runs (no model involved), 2026-09-23:
+- `--repo canfieldjuan/sol-5-6-cicd-lab --pr 17`: MERGED, 1/1 checks pass, 0 required, 0 unresolved threads.
+- `--repo canfieldjuan/ATLAS --pr 2532`: MERGED, 10 required checks (8 pass, 1 fail), 2 unresolved threads, in one call.
+- Bad arguments: `{"error": "usage: ..."}` on stderr, exit 2.
