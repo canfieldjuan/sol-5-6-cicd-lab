@@ -21,7 +21,8 @@ async function fixture(hooks = EXISTING) {
     source: path.join(rootDir, "hooks", "codex-guards"),
     installDir: path.join(root, "codex", "hooks", "lab-guards"),
     hooksJson: path.join(root, "codex", "hooks.json"),
-    stateDir: path.join(root, "state", "sol-lab")
+    stateDir: path.join(root, "state", "sol-lab"),
+    binDir: path.join(root, "bin")
   };
   await mkdir(path.join(root, "codex"), { recursive: true });
   if (hooks !== null) await writeFile(paths.hooksJson, JSON.stringify(hooks, null, 2));
@@ -111,6 +112,21 @@ test("status: not installed, then installed-not-active, then active only after a
     await writeFile(path.join(paths.stateDir, "guards", "heartbeat.json"), JSON.stringify({ at: "2026-09-22T11:00:00.000Z", event: "PreToolUse", session: "s" }));
     assert.equal((await status(paths)).status, "active");
     await writeFile(path.join(paths.installDir, "guard.mjs"), "// drift\n");
+    assert.equal((await status(paths)).status, "broken");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("codex-pr-status wrapper: installed executable on PATH dir, points at the installed helper, refuses a foreign file, status checks it", async () => {
+  const { root, paths } = await fixture();
+  try {
+    await install({ ...paths, apply: true });
+    const wrapper = await readFile(path.join(paths.binDir, "codex-pr-status"), "utf8");
+    assert.match(wrapper, new RegExp(`exec node '${paths.installDir}/bin/codex-pr-status.mjs' "\\$@"`));
+    const { statSync } = await import("node:fs");
+    assert.ok(statSync(path.join(paths.binDir, "codex-pr-status")).mode & 0o111, "executable");
+    await install({ ...paths, apply: true }); // idempotent: its own wrapper is fine
+    await writeFile(path.join(paths.binDir, "codex-pr-status"), "#!/bin/sh\necho someone else\n");
+    await assert.rejects(install({ ...paths, apply: true }), /was not written by this script/);
     assert.equal((await status(paths)).status, "broken");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
