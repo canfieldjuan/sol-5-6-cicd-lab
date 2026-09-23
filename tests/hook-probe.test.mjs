@@ -94,6 +94,18 @@ test("developerMessages reads only developer-role messages from a rollout", asyn
   assert.deepEqual(developerMessages(rollout), ["CTX"]);
 });
 
+test("Q7/Q8 report whether a hook can see the working directory and whether it fires for a missing one", () => {
+  const blind = { hookEvents: [{ hook_event_name: "PreToolUse", cwd: "/tmp/fx", tool_input: { command: "pwd" } }], rollout: "" };
+  const sees = { hookEvents: [{ hook_event_name: "PreToolUse", cwd: "/tmp/fx/sub", tool_input: { command: "pwd" } }], rollout: "" };
+  const badwd = { hookEvents: [{ hook_event_name: "PreToolUse", cwd: "/tmp/fx", tool_input: { command: "ls" } }], rollout: "Failed to create unified exec process" };
+  const base = { main: goodMain(), deny: goodMain(), rewrite: run(), trust: run() };
+  assert.equal(byId(evaluate({ ...base, workdir: blind, badwd }), "Q7").verdict, "no");
+  assert.equal(byId(evaluate({ ...base, workdir: sees, badwd }), "Q7").verdict, "yes");
+  assert.equal(byId(evaluate({ ...base, workdir: blind, badwd }), "Q8").verdict, "fires");
+  assert.equal(byId(evaluate({ ...base, workdir: blind, badwd: { hookEvents: [], rollout: "" } }), "Q8").verdict, "does not fire");
+  assert.equal(byId(evaluate(base), "Q7"), undefined);
+});
+
 test("the probe config registers PreToolUse and PostToolUse for every tool, and Stop", () => {
   const config = hooksJson("node hook.mjs");
   assert.equal(config.hooks.PreToolUse[0].matcher, "*");

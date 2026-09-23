@@ -24,7 +24,10 @@ export const RUNS = {
   // Q2 gets its own run: a fixed step list in the prompt competes with a redirect.
   deny: { bypassTrust: true, prompt: "Check that the shell works by running `echo PROBE_DENY`, then report what happened." },
   rewrite: { bypassTrust: true, prompt: "Run the shell command `echo PROBE_REWRITE` and report its exact output verbatim." },
-  trust: { bypassTrust: false, prompt: "Run the shell command `echo PROBE_TRUST` and report its output." }
+  trust: { bypassTrust: false, prompt: "Run the shell command `echo PROBE_TRUST` and report its output." },
+  // Q7/Q8: can a hook see a command's working directory, and does it fire when that directory is missing?
+  workdir: { bypassTrust: true, setup: ["sub"], prompt: "Run `pwd` with the shell tool's working-directory parameter set to the `sub` directory (do not use cd). Report the output." },
+  badwd: { bypassTrust: true, prompt: "Run `ls` with the shell tool's working-directory parameter set to `no-such-dir` (do not create it and do not use cd). Report exactly what happened." }
 };
 
 export function hooksJson(hookCommand) {
@@ -62,6 +65,7 @@ export async function probeOnce(name, { stateRoot, model, effort, timeoutMs, art
     await writeFile(path.join(codexHome, "AGENTS.md"), "# Probe\nFollow the user's steps exactly.\n");
     await symlink(path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "auth.json"), path.join(codexHome, "auth.json"));
     spawnSync("git", ["init", "-q", "-b", "main"], { cwd: fixture });
+    for (const dir of spec.setup ?? []) await mkdir(path.join(fixture, dir), { recursive: true });
     const args = ["exec", "--json", "--skip-git-repo-check", ...(spec.bypassTrust ? ["--dangerously-bypass-hook-trust"] : []), spec.prompt];
     const result = await run(codexBin, args, { cwd: fixture, env: { ...process.env, CODEX_HOME: codexHome, HOME: fakeHome }, timeoutMs });
     await mkdir(artifactDir, { recursive: true });
@@ -83,7 +87,7 @@ export async function probeOnce(name, { stateRoot, model, effort, timeoutMs, art
     const agentMessages = result.stdout.split("\n").flatMap((line) => {
       try { const e = JSON.parse(line); return e.type === "item.completed" && e.item?.type === "agent_message" ? [e.item.text] : []; } catch { return []; }
     });
-    return { name, code: result.code, stderr: result.stderr, hookEvents, events, agentMessages, rollout, developerMessages: developerMessages(rollout), streamError: await eventStreamErrorText(result.stdout), fixture };
+    return { name, code: result.code, stderr: result.stderr, hookEvents, events, agentMessages, rollout, fixtureReal: fixture, developerMessages: developerMessages(rollout), streamError: await eventStreamErrorText(result.stdout), fixture };
   } finally {
     await rm(runDir, { recursive: true, force: true });
     await rm(fixture, { recursive: true, force: true });
@@ -110,7 +114,7 @@ async function eventStreamErrorText(stdout) {
 const has = (events, pattern) => events?.commands.some((item) => pattern.test(item.command) || pattern.test(item.output));
 
 // Evaluates the six contract questions from the three runs.
-export function evaluate({ main, deny, rewrite, trust }) {
+export function evaluate({ main, deny, rewrite, trust, workdir, badwd }) {
   const q = [];
   const patchHooks = main.hookEvents.filter((e) => /notes\.txt|Add File/.test(JSON.stringify(e.tool_input ?? {})));
   q.push({ id: "Q1 apply_patch reaches hooks", verdict: patchHooks.length ? "observed" : "not observed",
@@ -142,6 +146,16 @@ export function evaluate({ main, deny, rewrite, trust }) {
   q.push({ id: "Q6 untrusted hooks without the bypass flag",
     verdict: trust.hookEvents.length ? "ran" : "skipped",
     detail: `hook events=${trust.hookEvents.length}; stderr hook/trust lines: ${trust.stderr.split("\n").filter((l) => /hook|trust/i.test(l)).join(" | ").slice(0, 400) || "(none)"}` });
+  if (workdir) {
+    const pre = workdir.hookEvents.filter((e) => e.hook_event_name === "PreToolUse" && /pwd/.test(JSON.stringify(e.tool_input ?? {})));
+    q.push({ id: "Q7 hook sees the command's working directory", verdict: pre.some((e) => /\/sub\b/.test(`${e.cwd} ${JSON.stringify(e.tool_input)}`)) ? "yes" : "no",
+      detail: pre.map((e) => `cwd=${e.cwd} tool_input=${JSON.stringify(e.tool_input)}`).join(" | ").slice(0, 400) || "no PreToolUse for pwd" });
+  }
+  if (badwd) {
+    const pre = badwd.hookEvents.filter((e) => e.hook_event_name === "PreToolUse" && /\bls\b/.test(JSON.stringify(e.tool_input ?? {})));
+    q.push({ id: "Q8 PreToolUse fires for a missing working directory", verdict: pre.length ? "fires" : "does not fire",
+      detail: `${pre.map((e) => `cwd=${e.cwd} tool_input=${JSON.stringify(e.tool_input)}`).join(" | ").slice(0, 300)}; rollout CreateProcess error=${/Failed to create unified exec process/.test(badwd.rollout ?? "")}` });
+  }
   return q;
 }
 
