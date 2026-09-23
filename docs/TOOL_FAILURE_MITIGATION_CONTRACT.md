@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 12; section 5.2 accepted (PR #13), amended in revisions 7-12. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 13; section 5.2 accepted (PR #13), amended in revisions 7-13. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -268,6 +268,11 @@ re-run on every upgrade before guards are trusted.
 - A write target inside a declared root must match an `allow` glob. A target inside some other git repository (any ancestor with `.git`) is out of scope. A target in no git repository (scratch files such as `/tmp/pr-body.md`) is allowed.
 - **Drift is measured from session start.** At the first guard event of a session, the guard records each root's already-dirty files (`git status --porcelain`). The Stop check flags only files that became dirty after that and match no `allow` glob, so pre-existing work is never blamed on the session.
 - A scope redirect is answered (revision 9) when the final message names each out-of-scope file, so the operator sees any deliberate out-of-scope change.
+
+**Scope guard details (revision 13).**
+- "Session start" is the first guard event at which `scope.json` is present and valid. A session that writes `scope.json` partway through (for example when a PR starts) gets its baseline then, instead of never having one; the files dirty at that moment, including `scope.json` itself, are baseline. A malformed file is logged once per session, not once per event.
+- Drift reported at a Stop, whether it blocked or was already answered in the final message, joins the baseline. The same files never block a later turn of the session, which keeps "blocks at most once" true across turns and not only within one stop.
+- Drift paths come from `git status --porcelain -z`, so paths with spaces are exact, and a rename is reported by its destination.
 
 `codex-pr-status --repo R --pr N` (installed to `~/.local/bin`) prints JSON
 with state, head SHA, mergeable, required and all checks, reviews, and
