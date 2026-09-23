@@ -185,7 +185,12 @@ port to the real `~/.claude/hooks` scripts' verdicts, except the four named
 divergences. 36 targeted mutations, all killed, against a passing baseline.
 
 Side finding: in this Claude session, the Claude `round-guard.sh` fired "12
-pushes to `<current-branch>`". The session had pushed 2 branches once each. The
-count came from the same two defects as revisions 15-16: the bucket, and text
-that contains "git push". The Claude hook is untouched (H6); the fix is offered
-as a follow-up.
+pushes to `<current-branch>`" (14 by the time it was reproduced). Correction:
+across the whole transcript, the session had pushed 17 different branches once
+each, so it had no rounds. (The first note said "2 branches", which counted
+only the stretch after the context compaction.) The count came from the same
+defects as revisions 15-16. At the operator's direction, both Claude hooks were
+fixed (contract revision 17). Afterwards, the same transcript does not block,
+17 before-and-after checks pass (the original fails 11 of them), and the parity
+test expects agreement on every case. Pointed at the original hooks, both
+parity tests fail.
