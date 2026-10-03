@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { decide, main, runStopGates, STOP_GATES } from "../hooks/codex-guards/guard.mjs";
 import { execCommands, readRollout } from "../hooks/codex-guards/lib/rollout.mjs";
 import { unbackedClaims } from "../hooks/codex-guards/stop/evidence-gate.mjs";
@@ -68,6 +69,39 @@ test("evidence: unbacked results block; backed, hedged, context-free, fenced, an
   assert.deepEqual(unbackedClaims(["```\ncommit deadbeefc0ffee1, 41 passed test\n```"], []), [], "fenced block is quoted evidence");
   assert.deepEqual(unbackedClaims(["DocSum PR #90 passed its review gate."], []), [], "revision 15: #90 is an identifier");
   assert.deepEqual(unbackedClaims(["PR #90: 90 passed in the gate."], []), ["test count: 90 passed"], "a real count beside a #N still counts");
+});
+
+// Revision 18: node:test summary lines back a count; nothing else changes.
+test("evidence (revision 18): a runner summary line backs a count only with the same digits and outcome", () => {
+  const claim = "Node: 94 tests, 94 passed, 0 failed.";
+  const spec = "\u2139 tests 94\n\u2139 suites 0\n\u2139 pass 94\n\u2139 fail 0\n\u2139 cancelled 0";
+  assert.deepEqual(unbackedClaims([claim], [spec]), [], "node:test spec reporter");
+  assert.deepEqual(unbackedClaims([claim], ["1..94\n# tests 94\n# suites 0\n# pass 94\n# fail 0"]), [], "node:test TAP reporter (piped on Node 20-22)");
+  assert.deepEqual(unbackedClaims([claim], [JSON.stringify({ chunk_id: "x", exit_code: 0, output: "1..94\n# tests 94\n# pass 94\n# fail 0\n" })]), [], "TAP inside a JSON-encoded exec chunk");
+  assert.deepEqual(unbackedClaims([claim], ["\u2139 tests 940\n\u2139 pass 940\n\u2139 fail 10"]), ["test count: 94 passed", "test count: 0 failed"], "940 and 10 are not 94 and 0");
+  assert.deepEqual(unbackedClaims([claim], ["\u2139 pass 194\n\u2139 fail 0"]), ["test count: 94 passed"], "194 is not 94");
+  assert.deepEqual(unbackedClaims(["The suite gives 94 failed and 0 passed."], [spec]), ["test count: 94 failed", "test count: 0 passed"], "the outcome must match");
+  assert.deepEqual(unbackedClaims(["The suite gives 94 passed."], ["\u2139 tests 94\n\u2139 fail 0"]), ["test count: 94 passed"], "a total is not a pass count");
+  assert.deepEqual(unbackedClaims(["The suite gives 94 passed."], ["notes: # pass 94"]), ["test count: 94 passed"], "TAP form only at a line start");
+  // As printed by pytest 9.0.2 and cargo 1.98.0: the verbatim rule backs these.
+  assert.deepEqual(unbackedClaims(["pytest: 2 passed, 1 failed."], ["FAILED test_x.py::test_c - assert False\n1 failed, 2 passed in 0.02s"]), [], "pytest");
+  assert.deepEqual(unbackedClaims(["cargo test: 2 passed, 0 failed."], ["test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"]), [], "cargo");
+});
+
+// Excerpted from the rows of Codex session 01a1006d (2026-10-03), a resumed
+// session: the prior turn's run printed pass 93 / fail 1, the third turn's run
+// pass 94 / fail 0. Contract revision 18 lists the redactions.
+test("evidence (revision 18): the real rollout's node:test claim is backed; the prior turn's numbers are not", () => {
+  const cases = [["node-test-counts.jsonl", []], ["node-test-counts-near-miss.jsonl", ["test count: 93 passed", "test count: 1 failed"]]];
+  for (const [name, tokens] of cases) {
+    const file = fileURLToPath(new URL(`./fixtures/stop-evidence/${name}`, import.meta.url));
+    const last = readRollout(file).prose.at(-1);
+    for (const turnId of ["01a1008c-e027-73e1-9192-789e205fc39e", null]) {
+      const { findings, errors } = runStopGates({ transcript_path: file, stop_hook_active: false, turn_id: turnId, last_assistant_message: last }, {}, "/h");
+      assert.deepEqual(errors, []);
+      assert.deepEqual(findings.find((f) => f.code === "evidence-gate")?.tokens ?? [], tokens, `${name}, turn_id ${turnId}`);
+    }
+  }
 });
 
 test("round guard: tiers at 5/10/15/20 on the most recently pushed branch, once per tier", () => {

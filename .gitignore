@@ -17,3 +17,7 @@ coverage/
 
 # Hand-written analyzer fixtures are test inputs, not generated transcripts.
 !tests/fixtures/tool-failures/*.jsonl
+
+# Redacted excerpts of one real rollout, kept as Stop-gate regression inputs
+# (contract revision 18; the redactions are listed there).
+!tests/fixtures/stop-evidence/*.jsonl
