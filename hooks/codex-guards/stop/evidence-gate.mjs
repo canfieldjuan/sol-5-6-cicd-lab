@@ -1,7 +1,7 @@
 // Evidence gate, Codex port (contract 5.3). The rules are a verbatim port of
-// ~/.claude/hooks/evidence-gate.sh, except the revision-15 divergences named
-// below; tests/codex-stop-parity.test.mjs holds both to the same verdicts on
-// everything else. The transcript reader differs.
+// ~/.claude/hooks/evidence-gate.sh, except the revision 15 and 18 divergences
+// named below; tests/codex-stop-parity.test.mjs holds both to the same verdicts
+// on everything else. The transcript reader differs.
 
 const TEST_CTX = /\b(test|tests|testing|suite|suites|pytest|spec|specs|unit|integration|table|rows?|gate|ci|check|checks|case|cases|assertion|assertions|coverage|regression)\b/i;
 const GIT_CTX = /\b(commit|commits|committed|sha|hash|squash|squashed|merge|merged|head|rev|revision|branch|tag|push|pushed|cherry-pick|ref|refs|object|blob|tree|checkout|rebase|diff|pr)\b/i;
@@ -13,6 +13,22 @@ const PATTERNS = [
   [/\bexit(?:=|\s+code\s+)\d+\b/g, "exit code", null],
   [/\b(?=[0-9a-f]{7,40}\b)[0-9a-f]*[a-f][0-9a-f]*\b/g, "git object id", GIT_CTX]
 ];
+
+// Revision 18: node:test never prints "94 passed". Its spec reporter prints
+// "\u2139 pass 94" and its TAP reporter (piped, Node 20-22) "# pass 94" at a
+// line start; in a JSON-encoded exec chunk that line break is a "\n" escape.
+// Such a line backs a count with the same digits and outcome. A total
+// ("tests 94") backs neither outcome.
+const RUNNER_COUNTS = [/\u2139 (pass|fail) (\d+)\b/g, /(?:^|\\n)# (pass|fail) (\d+)\b/gm];
+const OUTCOMES = { pass: "passed", fail: "failed" };
+
+function runnerCounts(evidence) {
+  const counts = new Set();
+  for (const pattern of RUNNER_COUNTS) {
+    for (const [, outcome, digits] of evidence.matchAll(pattern)) counts.add(`${digits} ${OUTCOMES[outcome]}`);
+  }
+  return counts;
+}
 
 const HEDGE = /\b(i (?:claimed|said|reported|stated)|claimed (?:earlier|above)|earlier|previously|above|unverified|not verified|no longer|was wrong|turned out|stale|i have not|haven't (?:run|verified)|cannot verify)\b/i;
 const BOUNDARIES = [". ", "! ", "? ", "\n"];
@@ -28,6 +44,7 @@ export function unbackedClaims(proseParts, evidenceParts) {
   // Fenced blocks are quoted evidence, not fresh assertions.
   const prose = proseParts.join("\n").replace(/```[\s\S]*?```/g, " ");
   const evidence = evidenceParts.join("\n").toLowerCase();
+  const counts = runnerCounts(evidence);
   const seen = new Set();
   const bad = [];
   for (const [pattern, label, context] of PATTERNS) {
@@ -37,6 +54,7 @@ export function unbackedClaims(proseParts, evidenceParts) {
       if (seen.has(key)) continue;
       seen.add(key);
       if (evidence.includes(key)) continue;
+      if (label === "test count" && counts.has(key.replace(/\s+/, " "))) continue;
       const sentence = sentenceAround(prose, match.index, match.index + token.length);
       if (HEDGE.test(sentence)) continue;
       if (context && !context.test(sentence)) continue;

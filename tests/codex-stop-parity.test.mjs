@@ -10,9 +10,10 @@ import { R } from "./codex-rollout-rows.mjs";
 
 // Parity with the Claude originals (contract 5.3). Each case states the verdict
 // both implementations must give. Since revision 17 the Claude originals carry
-// the revision 15-16 fixes too, so a `claude` override remains only where the
-// transcript formats themselves differ. When the Claude scripts are absent
-// (CI), the Codex side is still held to the stated verdicts.
+// the revision 15-16 fixes too. A `claude` override marks a named divergence:
+// since revision 18, node:test summary lines back a count on the Codex side
+// only. When the Claude scripts are absent (CI), the Codex side is still held
+// to the stated verdicts.
 const CLAUDE_HOOKS = path.join(os.homedir(), ".claude", "hooks");
 const EVIDENCE_SH = path.join(CLAUDE_HOOKS, "evidence-gate.sh");
 const ROUND_SH = path.join(CLAUDE_HOOKS, "round-guard.sh");
@@ -29,7 +30,13 @@ const EVIDENCE_CASES = [
   { prose: "```\ncommit deadbeefc0ffee1 and 41 passed tests\n```\nSee above.", evidence: "", tokens: [] },
   { prose: "Pushed abcdef1234 to the branch.", evidence: "HEAD is now at ABCDEF1234", tokens: [], note: "backing is case-insensitive" },
   { prose: "DocSum PR #90 passed its review gate.", evidence: "", tokens: [], note: "#N is an identifier (revision 15; Claude since 17)" },
-  { prose: "PR #90: 90 passed in the gate.", evidence: "", tokens: ["test count: 90 passed"], note: "a real count beside a #N still counts" }
+  { prose: "PR #90: 90 passed in the gate.", evidence: "", tokens: ["test count: 90 passed"], note: "a real count beside a #N still counts" },
+  { prose: "Node: 94 tests, 94 passed, 0 failed; exit 0.", evidence: "\u2139 tests 94\n\u2139 suites 0\n\u2139 pass 94\n\u2139 fail 0", tokens: [], claude: ["test count: 94 passed", "test count: 0 failed"], note: "node:test spec summary backs the count (revision 18; Codex only)" },
+  { prose: "The suite gives 4 passed, 0 failed.", evidence: "1..4\n# tests 4\n# pass 4\n# fail 0", tokens: [], claude: ["test count: 4 passed", "test count: 0 failed"], note: "node:test TAP summary (revision 18; Codex only)" },
+  { prose: "Node: 94 tests, 93 passed, 1 failed.", evidence: "\u2139 tests 94\n\u2139 pass 94\n\u2139 fail 0", tokens: ["test count: 93 passed", "test count: 1 failed"], note: "a summary with other numbers backs nothing" },
+  { prose: "The suite gives 94 failed.", evidence: "\u2139 tests 94\n\u2139 pass 94\n\u2139 fail 0", tokens: ["test count: 94 failed"], note: "the outcome must match" },
+  { prose: "pytest: 2 passed, 1 failed.", evidence: "1 failed, 2 passed in 0.02s", tokens: [] },
+  { prose: "cargo test: 2 passed, 0 failed.", evidence: "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s", tokens: [] }
 ];
 
 function runClaudeEvidence(dir, { prose, evidence }) {

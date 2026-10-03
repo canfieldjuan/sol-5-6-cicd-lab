@@ -167,6 +167,16 @@ rollouts cut at every `task_complete`). Every block was reviewed by hand.
 | Port as specified (revision 14) | 173 | 19 (4 evidence, 15 round) | 2 evidence blocks were false (sub-agent SHAs, "PR #90 passed"); 3 round blocks mixed repos in the `HEAD` / `<current-branch>` buckets |
 | Revision 15 | 174 | 18 (3 evidence, 15 round) | All genuine: 3 unbacked claims ("1383 passed" appears in no output; "9 passed" where the only run printed 1 test and exited 101; a test node named nowhere in the session) and round tiers on one named branch or one directory each |
 | Revision 16 | 174 | 18 | Unchanged, so executed-row counting added no false blocks |
+| Revision 18 (2026-10-03, the 20 rollouts then most recent; before: 13 blocks, 2 evidence) | 179 | 12 (1 evidence, 11 round) | The one removed block is the 2026-10-03 false positive ("94 passed, 0 failed", backed by node:test's `pass 94` / `fail 0`). The remaining evidence block is the revision 15 "1383 passed", still unbacked |
+
+Revision 18 over the 80 most recent rollouts (401 turns): blocks went from
+33 to 31, and none were added. Besides the 2026-10-03 block, two false tokens
+went: "`pnpm test`: 52 passed" (that turn's last node:test run printed
+`pass 52`) and "Desktop boundary suite: 20 passed" (`pass 20`). The same
+sentence's "18 passed", a Python count with no matching output in the turn,
+still blocks. Seven targeted mutations of the new rule were all killed against
+a passing baseline: TAP anchor, escaped-newline anchor, outcome, total as
+pass, any-line backing, substring digits, and rule removed.
 
 **Live**
 
