@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 17; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-17. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 18; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -500,6 +500,103 @@ setup scripts with `cat > f <<'EOF'`. H6 still holds for the lab guards, which
 never modify Claude hooks. This change was an operator-directed edit made
 outside the lab. The parity test now expects the two sides to agree on every
 case.
+
+### Live false positive: node:test counts (revision 18)
+
+On 2026-10-03 the evidence gate blocked a true, backed claim. Codex session
+`01a1006d-b53c-7ad0-89f4-b201f6d50ba7` was continued with `codex exec resume`.
+In its third turn it ran
+`node --test --experimental-strip-types --test-isolation=none desktop/test/*.test.ts`,
+and the output the model received ended with the summary lines `tests 94`,
+`pass 94`, and `fail 0`, each after the glyph U+2139 that node:test prints. The
+final message said "Node: **94 tests, 94 passed, 0 failed; exit 0.**" The gate
+blocked it with `test count: 94 passed` and `test count: 0 failed` (the
+denials.jsonl entry at 2026-10-03T06:58:10Z). Codex then retracted the claim,
+and the retraction was itself false: "I was citing the prior turn's Node
+output ... I have not rerun verification." The prior turn's two runs printed
+pass 92 / fail 2 and pass 93 / fail 1. Pass 94 / fail 0 appears only in the
+third turn. A gate that turns a backed claim into a false one is worse than no
+gate (H3).
+
+Reproduced offline on the rollout cut where Stop fired (its first 491 lines),
+with the code at revision 17:
+- **Cause: the token form.** A count is backed only when its own text, such as
+  `94 passed`, appears in the turn's evidence. node:test never prints that. Its
+  spec reporter prints `U+2139 pass 94`. Its TAP reporter prints `# pass 94`.
+  Spec is the default on Node 23 and later, and TAP is the default for piped
+  output on Node 20 and 22, the repo's supported floor. Codex runs commands
+  without a TTY. So no node:test count was ever backed. pytest (`94 passed`)
+  and cargo (`test result: ok. 94 passed; 0 failed; ...`) print the token
+  itself and were not affected.
+- **Not the turn boundary.** Each `codex exec resume` turn appends two
+  `thread_settings_applied` rows to the same rollout, then its own
+  `task_started`. The Stop input carries `turn_id` (section 5.1 probe logs).
+  Pinned to that turn, and with the last-`task_started` fallback, the reader
+  selects the same rows. In both cases the turn's evidence includes the pass 94
+  output, and the gate reports the same two tokens.
+- The Claude original has the same false positive, because it backs a count
+  the same way.
+
+The change is a named divergence from the Claude original, the first since
+revision 17. The parity test asserts it separately:
+- A test count `N passed` or `N failed` is also backed when the current turn's
+  evidence carries the same number for the same outcome in a recognized
+  test-runner summary form:
+  - node:test spec: `U+2139 pass N`, `U+2139 fail N`;
+  - node:test TAP: `# pass N`, `# fail N`, at the start of a line. The line
+    break may be a real newline or the `\n` escape inside a JSON-encoded
+    `exec` chunk;
+  - pytest (`N passed`, `N failed`) and cargo (`test result: ok. N passed; M
+    failed; ...`) already print the token verbatim, so the verbatim rule backs
+    them. Tests lock that in.
+- The number is read whole and compared digit for digit, so `pass 940` and
+  `pass 194` do not back `94 passed`.
+- The outcome must match: `pass 94` does not back `94 failed`, and `fail 0`
+  does not back `0 passed`.
+- A total is not an outcome. `tests 94` backs neither `94 passed` nor
+  `94 failed`. The gate has no total-count token, so "94 tests" is never
+  flagged.
+- The verbatim rule is unchanged, so every existing verdict stands. The new
+  rule can only remove blocks.
+
+Unchanged and inherited, noted but not fixed:
+- Backing is per token, not per run. A pass count from one run and a fail
+  count from another run in the same turn can back one sentence. The verbatim
+  rule has always behaved this way.
+- The verbatim rule is a substring match, so `0 failed` is backed by
+  `10 failed`. This is a sharper case of the revision 15 note. The runner-form
+  rule does not have the flaw. Fixing the verbatim rule would change the Claude
+  original's verdicts too, so like revision 17 it needs an operator-directed
+  follow-up.
+- The Claude original is unchanged (H6). The same fix is offered there as a
+  follow-up.
+
+Settling evidence:
+- A regression fixture excerpted from the real rollout rows: the prior turn's
+  `task_started` and its pass 93 / fail 1 run, then the third turn's
+  `task_started`, its commentary, the node run and its output, and the final
+  message. It must pass, both pinned to the turn and with the fallback. It must
+  block with the two tokens on the revision 17 gate. Because the repo is
+  public, the excerpt makes these edits: `workdir` paths are neutral, the prior
+  run's output is cut to its summary lines, and the diff bodies inside the
+  final message's fences are elided. The gate ignores fenced blocks. Every byte
+  the gate reads from this turn is verbatim.
+- A near-miss fixture: the same rows, with the final message citing the prior
+  turn's numbers (`93 passed, 1 failed`). It must block with both tokens. The
+  numbers do not match this turn's output, and the output that does match them
+  is in the previous turn.
+- Unit tests:
+  - TAP inside a JSON-encoded chunk, and `# pass N` mid-line, which must not
+    back a count;
+  - whole-number and outcome mismatches;
+  - a total on its own;
+  - pytest and cargo summaries as printed by pytest 9.0.2 and cargo 1.98.0.
+- Parity cases:
+  - node:test spec and TAP. The Claude original still blocks these, which is
+    the divergence;
+  - the mismatches, which both sides block.
+- A replay of the 20 most recent native rollouts, before and after. The change
+  may only remove blocks, and every removed block is listed.
 
 ### Behavior change for the operator
 
