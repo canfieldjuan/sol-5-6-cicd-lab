@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 17; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-17. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 17; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-17. Revision 18 proposes section 5.4 (step 6, plan adherence). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -44,6 +44,8 @@ In scope, all in this lab (tracked sources plus installers, the pattern of
 4. Codex ports of the dormant Stop hooks `evidence-gate.sh` and `round-guard.sh`.
 5. Before/after measurement and the list of AGENTS.md rules the mechanisms make
    removable (feeds `instructions/rule-inventory.json`).
+6. Plan adherence: verification and churn checks on the scope guard's
+   declaration (section 5.4).
 
 Out of scope: changes to Codex itself; the shared `~/.claude/hooks/git_guard.py`
 (it also guards Claude Code and must not change behavior for Claude); Atlas
@@ -508,6 +510,197 @@ one continuation asking for evidence or a hedge. Fix loops get a
 checkpoint question at 5, 10, 15, and 20 pushes per branch. Neither ends a
 turn.
 
+## 5.4 Step-6 specification: plan adherence (revision 18; proposed)
+
+### Trigger
+
+The operator is about to hand Codex a written plan (first use: Email Watcher
+desktop UI changes) and wants it carried out without drift, without churn while
+addressing review, and without excess testing and verification. Guard 6
+already denies writes outside the declared globs. It cannot see three things:
+verification commands, changes inside an allowed file that the plan did not
+ask for, and how much changed.
+
+### Measurement (2026-10-03, scratch script; claims until the analyzer reproduces them)
+
+Rollouts under `~/.codex/sessions` modified on or after 2026-09-01: 416
+sessions, 162,774 commands, 22,151 `apply_patch` calls. A command counts as
+verification when it matches the pattern list in "Verification" below.
+
+| Measure | Value |
+|---|---|
+| Sessions with any verification | 106 |
+| Verification commands | 17,637 |
+| Per verifying session, p50 / p75 / p90 / max | 8 / 40 / 548 / 2,861 |
+| Exact re-runs with only read-only commands since the identical previous run | 360, in 37 sessions |
+
+Reading: certain re-runs are about 2% of verification, so a re-run check alone
+would not move the volume. This measurement does not classify the rest (full
+suite after a targeted pass, checks the task never needed, multi-day arcs), so
+step 6.2 classifies it before any default budget is proposed. Churn inside
+allowed files is not measured at all. The one recorded case is ATLAS #2361
+(`round-guard.sh` header: nine rounds, three of the last five fixing defects
+introduced the round before).
+
+### Why hooks, not a reviewing agent
+
+A Codex agent (`~/.codex/agents/*.toml`) that judges "is this diff on plan" is
+a second model making the semantic call the evidence gate deliberately leaves
+unmechanised, and it costs a model run per check. Every check below is a
+deterministic function of the scope file, the command string, and `git`. What
+the plan means stays with the planner. The hook enforces what the plan
+declares.
+
+### Precondition
+
+Section 5.1 requires the step-2 probe to be re-run on every codex-cli upgrade
+before guards are trusted. The probe ran on 0.156.0. The installed version on
+2026-10-03 is 0.160.0. Step 6.3 does not start until the probe passes on the
+installed version.
+
+### Declaration: three optional keys in `scope.json`
+
+Same file, same opt-in (H5), same baseline. When the new keys are absent,
+revision-13 behavior is unchanged.
+
+```json
+{
+  "roots": ["/abs/repo"],
+  "allow": ["desktop/src/inbox/**", "tests/test_inbox_api.py"],
+  "pr": 190,
+  "goal": "Inbox: show automation outcomes per attachment",
+  "plan": "docs/plans/inbox-ui.md",
+  "verify": {
+    "commands": ["uv run --frozen pytest tests/test_inbox_api.py", "pnpm -C desktop test"],
+    "max_runs": 8
+  },
+  "churn": {
+    "max_lines": 400,
+    "max_new_tests": 6,
+    "anchors": [{ "path": "src/eom_email_watcher/api.py", "start": 210, "end": 248 }]
+  }
+}
+```
+
+- `plan`: a path quoted in every reason, so a redirect points back at the
+  source of truth. Not parsed.
+- `verify.commands`: the plan's checks, written exactly as Codex should run
+  them. A leading `cd <dir> &&` matches only if it is declared that way. The
+  guard never infers that two spellings are equivalent (H3).
+- `verify.max_runs`: total verification commands allowed in the session.
+- `churn.max_lines`: added plus deleted lines across the session's changes.
+- `churn.max_new_tests`: added test declarations.
+- `churn.anchors`: line ranges, in baseline line numbers, that a review round
+  may change. They are built from unresolved review threads (step 6.5).
+- A malformed value makes only that key inactive and is logged once
+  (revision-13 rule). It is never enforced by guessing.
+
+### Baseline additions
+
+At the baseline event (revision 13), the guard also records each root's
+`HEAD`. Every churn measure is `git diff <baseline HEAD>` against the working
+tree, so commits made during the session count, and files dirty at baseline
+stay excluded as today. If the baseline `HEAD` is no longer an ancestor of
+`HEAD` (after a rebase or reset), churn checks for that root are skipped and
+logged. The diff would then include other people's changes, and H3 forbids
+guessing.
+
+### Verification (PreToolUse, guard 7)
+
+A verification command is a command segment (`lib/shell.mjs` `segments`)
+matching `pytest`, `py.test`, `python -m pytest`, `vitest`, `jest`, `tsc`,
+`ruff`, `mypy`, `pyright`, `eslint`, `cargo test|check|clippy`, `go test`,
+`node --test`, `npm|pnpm|yarn [run] test|check|lint|typecheck|build|verify`, or
+`make test|check|lint|verify`. Normalization drops a trailing `2>&1`, a
+trailing `| tail ...` or `| head ...`, and repeated whitespace. Each
+verification segment is checked and counted separately.
+
+| # | Trigger (all conditions) | Action | Cleared by |
+|---|---|---|---|
+| 7a | `verify.commands` declared; the segment is verification; no declared command is a prefix of it. A declared command narrowed by extra arguments (a path, `-k expr`, a node id) passes | Deny + Stop backstop. Reason: the declared commands, the plan path, and that narrowing is allowed | a later declared command; or the final message names the undeclared check and why it is needed |
+| 7b | `verify` declared; the same normalized segment already ran this session at the same code fingerprint | Deny, no pending redirect. Reason: when it ran, and that nothing has changed since, so its result stands. Next action: edit first, or use that result | n/a |
+| 7c | `verify.max_runs` declared and this segment would exceed it | Deny + Stop backstop. Reason: the budget, the count, and "report the results you have" | the final message states the result of each declared check |
+
+Code fingerprint: sha256 over each root's `HEAD`, `git diff HEAD --binary`, and
+the untracked file list with sizes and mtimes. A run is recorded when
+PreToolUse allows it. A failing check does not earn a retry: a check that
+passes only on retry is a finding to report, not a result to re-roll.
+
+### Churn (Stop, extends the drift check)
+
+| # | Trigger | Action | Answered when |
+|---|---|---|---|
+| 8a | A changed file whose whole diff from baseline disappears under `git diff -w --ignore-blank-lines` (formatting only). Partial whitespace hunks are not flagged, because re-indenting under a new block is legitimate | Block once: name the files; the next action is to revert them | the final message names each file |
+| 8b | `churn.max_lines` declared and `git diff --numstat` from baseline exceeds it (binary files excluded) | Block once: the total and the five largest files | the final message names each of those files |
+| 8c | `churn.max_new_tests` declared and added lines matching `def test_`, `async def test_`, `test(`, `it(`, or `describe(` exceed it | Block once: the count per file | the final message names each file |
+| 8d | `churn.anchors` declared and a hunk in a file that existed at baseline overlaps no anchor in that file, each anchor widened by 10 lines on both sides. Added files are governed by `allow` only | Block once: each unanchored hunk as `path:line` | the final message names each file |
+
+Every Stop finding joins the acknowledged set (revision 13), so it blocks at
+most once per session. The existing rules still hold: never block twice in a
+row (`stop_hook_active`), and fail open on error (H4).
+
+### Concurrency
+
+- Codex can run tool calls concurrently, so two PreToolUse processes can
+  read-modify-write the session state at once. Verification runs are therefore
+  recorded in an append-only per-session log (`verify-<session>.jsonl`, one
+  line per run, each a single `O_APPEND` write under 4 KiB), and 7b and 7c read
+  counts from that log. A concurrent run is never lost.
+- 7c is not a lock. Concurrent verification calls at `max_runs - 1` can each
+  pass and overshoot the budget by the number of calls in flight. This is
+  accepted and stated, not hidden.
+- Every git command the guard runs sets `GIT_OPTIONAL_LOCKS=0`, so the guard
+  never takes `index.lock` from under a concurrent Codex `git commit`.
+- Each git command has the 5-second timeout `dirtyFiles` uses. On a timeout,
+  the check that needed it is skipped and logged (H4). On ATLAS-scale repos,
+  that means 7b degrades to allowing the run.
+
+### Failure cases
+
+- A malformed key: inactive and logged once; the other keys still apply.
+- A baseline `HEAD` that is unreachable or no longer an ancestor: churn
+  checks skipped for that root and logged.
+- A git timeout or error: that check skipped and logged; the call is allowed.
+- A rollout where Codex runs checks through a script the patterns do not match
+  (`./run-tests.sh`): not verification by definition. The planner declares
+  such scripts in `verify.commands`; 7a only governs commands that match the
+  patterns.
+
+### PR helper (step 6.5)
+
+`scope-from-pr --repo R --pr N --allow <globs> --verify <cmd>...` writes
+`.codex/scope.json` with anchors from the PR's unresolved review threads
+(`path` and `startLine`/`line` on the current head, using the
+`codex-pr-status` queries). A thread with no current line (outdated) anchors
+its whole file and is listed on stderr, never dropped. The helper also adds
+`.codex/` to the repo's `.git/info/exclude`, so the scope file is never
+committed.
+
+### Settling evidence for step 6
+
+- Unit tests on both sides of 7a-7c and 8a-8d: a trip and a near miss for
+  each. Near misses include a declared command narrowed by `-k`, a re-indent
+  inside a new block, a hunk exactly 10 lines from an anchor, and a rebase
+  that moves the baseline off the ancestry path.
+- Revision-13 behavior is unchanged when the new keys are absent: the existing
+  scope tests pass unmodified.
+- A concurrency test: two simultaneous PreToolUse runs both appear in the
+  verify log.
+- One eval scenario per mechanism under `scenarios/instructions/`, with pass
+  and fail fixtures.
+- Replay before install: guard 7 over the rollouts measured above, reporting
+  how many calls 7a, 7b, and 7c would have denied.
+- First live use: the Email Watcher UI plan, reporting the denial log and the
+  final diffs.
+
+### Behavior change for the operator
+
+Only with a scope file that declares the new keys: Codex is refused undeclared
+checks, identical re-runs, and runs past the budget, with the plan's checks
+named. Formatting-only files, oversized diffs, extra tests, and edits away from
+the review threads get one continuation asking Codex to revert or justify them.
+Without the keys, nothing changes.
+
 ## 6. Failure cases
 
 - Malformed rollout lines (control characters) are parsed leniently and
@@ -542,3 +735,6 @@ turn.
    order.
 5. Stop-hook ports (step 4).
 6. Measurement and AGENTS.md trim candidates (step 5).
+7. Plan adherence (step 6): 6.1 this revision, stop for review; 6.2 analyzer
+   breakdown of verification volume; 6.3 guard 7; 6.4 churn checks 8a-8d;
+   6.5 `scope-from-pr`; 6.6 first live use.
