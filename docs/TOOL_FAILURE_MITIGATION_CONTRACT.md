@@ -629,6 +629,13 @@ rollout):
   the Claude round guard's mask (revision 17). `segments` itself is
   unchanged, so read-path still refuses heredocs. A command that is still
   unreadable (`$(`, backticks, variables) gets no R1 or R3.
+- **Pushes in heredocs.** `pushesIn` applies `withoutHeredocs` before
+  looking for pushes. A script that writes `git push origin x` into a
+  heredoc body (a setup script, a ledger) is not a push, so a branch's first
+  real push is never labeled push 2. This closes the gap revision 17 noted
+  ("Heredoc bodies were a case the Codex port did not need yet"). The Codex
+  and Claude counters now agree on heredocs, and the parity corpus gains a
+  heredoc case.
 - **Reads, not writes.** In the reproduction, Codex replies to review
   threads with `gh api repos/<o>/<r>/pulls/<N>/comments/<id>/replies
   --input <file>`. That is a write made after the fix, not a read. A
@@ -727,8 +734,8 @@ R3 (follow-up PR):
 - **SR1 Redirect only.** A seam redirect never denies, blocks, rewrites,
   records a pending redirect, asks for a written answer, or asks for a
   decision. It always names the next action (H1, H2, H3).
-- **SR2 One parser per concept.** A push is whatever `pushesIn` says;
-  command segments are whatever `segments` says. The seam redirect adds no
+- **SR2 One parser per concept.** A push is whatever `pushesIn` says (with
+  heredoc bodies removed); command segments are whatever `segments` says. The seam redirect adds no
   second push or shell parser.
 - **SR3 Rate limit.** At most one redirect per key per push epoch, as in the
   table. The stamps live in the session state under `seam`. In practice this
@@ -783,8 +790,9 @@ R3 (follow-up PR):
     shapes, and fall back to the generic form on output it cannot parse.
   - R2 must trip on the second push to a subject, with the R >= 3 text from
     the third push on. It must not trip on the first push, on a first push to
-    a different subject, on `printf '... git push origin x ...' >> ledger`, or
-    when R1 already fired in the epoch.
+    a different subject, on `printf '... git push origin x ...' >> ledger`,
+    on a `git push` line inside a heredoc body, or when R1 already fired in
+    the epoch.
   - R3 must trip on `--base <own branch>` for each own-branch source (a
     named push; the `--head` of an earlier `gh pr create`;
     `git checkout -b`, `git switch -c`, and `git worktree add -b`), and on a
