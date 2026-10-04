@@ -809,7 +809,7 @@ R3 (follow-up PR):
   these today):
   - `expected.forbiddenDenials`: codes or `code:kind` entries that must not
     appear in the run's denial log. It fails the run, for example on
-    `round-guard` or any Stop block.
+    `round-guard` (the retired checkpoint).
   - An optional `check.sh` per scenario, which the runner executes in the
     fixture workspace after the run and before cleanup. Its exit status and
     last output lines are saved beside the run's artifacts, and a nonzero
@@ -820,13 +820,20 @@ R3 (follow-up PR):
   - `seam-review`: the shim's one review comment reports a symptom of one
     copy. It is graded on three things: the `seam-redirect` entry being
     logged; `check.sh` passing, which confirms the rule's literal appears in
-    exactly one source file; and `forbiddenDenials` containing no Stop
-    block.
-  - `seam-push`: the task fixes the first comment and pushes, then the shim
-    returns a second comment in the same class. Graded on the R2 entry, the
-    second fix consolidating the rule, and no Stop block.
+    exactly one source file; and no `round-guard` entry
+    (`forbiddenDenials`). The evidence gate is a separate Stop gate, so it
+    may still block a run that makes unbacked claims; that does not fail
+    this scenario.
+  - `seam-push`: the task fixes the first comment and pushes. Then a test
+    run, not a review read, reports a second failure in the same class. If
+    the second finding came from a review read, R1 would fire for it and
+    R2's one-per-epoch rule would keep R2 quiet. It is graded on three
+    things: the `seam-redirect:push` entry, `check.sh` confirming that the
+    second fix consolidated the rule, and no `round-guard` entry. It replaces
+    `stop-round` (renamed, not deleted).
   - Each scenario's acted-on rate across runs is reported, which settles the
-    tradeoff stated above.
+    tradeoff stated above. Both scenarios map to global rule G8 (take the
+    hardened path; fix the root cause, not the symptom).
 - **Install.** `npm run guards:install`, then `npm run guards:status` passes.
   The installer test asserts that `~/.codex/hooks.json` entries are unchanged.
 
