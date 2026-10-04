@@ -609,6 +609,32 @@ All three parse with `segments` from `lib/shell.mjs`. Quoted text, `echo` and
 `printf` arguments, heredoc bodies, and session-ledger appends are not
 commands.
 
+Parsing details (found while checking the triggers against the reproduction
+rollout):
+- **Heredocs.** Codex often runs one script that writes a ledger line through
+  `python - <<'PY' ... PY` and then runs `gh` or `git` (the 01:03Z
+  `gh pr create` is one). `segments` refuses any command containing `<<`. R1
+  and R3 therefore read `segments(withoutHeredocs(command))`. The new
+  `withoutHeredocs` in `lib/shell.mjs` removes each `<<[-]WORD` operator
+  (quoted or not), and the body from the next line through the line that is
+  exactly `WORD` (leading tabs allowed for `<<-`). This is the same rule as
+  the Claude round guard's mask (revision 17). `segments` itself is
+  unchanged, so read-path still refuses heredocs. A command that is still
+  unreadable (`$(`, backticks, variables) gets no R1 or R3.
+- **Reads, not writes.** In the reproduction, Codex replies to review
+  threads with `gh api repos/<o>/<r>/pulls/<N>/comments/<id>/replies
+  --input <file>`. That is a write made after the fix, not a read. A
+  `gh api` call is not a review read when any of these holds:
+  - it has `--input`;
+  - it has `-X`/`--method` other than `GET`;
+  - it targets a REST path with a field flag (`-f`, `-F`, `--field`,
+    `--raw-field`), which makes gh send a POST;
+  - its path ends in `/replies`;
+  - it is a GraphQL query whose text starts with `mutation`.
+- **Several commands in one call.** When one event carries more than one
+  redirect (for example a push and a `gh pr create` in one script), the
+  texts are joined into one context output.
+
 **Redirect text.** Each redirect is a short list of actions. None contains a
 question addressed to the model, or a request to reply.
 
@@ -725,6 +751,11 @@ R3 (follow-up PR):
     `gh pr view N --json state,headRefOid`, `gh pr checks N`, `gh pr list`,
     `echo "gh pr view 12 --comments"`, a heredoc body containing the command,
     or a second read of the same PR in the same epoch.
+  - R1 must not trip on any write form listed under "Reads, not writes".
+  - R1 and R3 must trip on their command when it follows a heredoc in the
+    same script (the 01:03Z shape). `withoutHeredocs` has its own tests on
+    both sides: quoted and bare words, `<<-`, an unterminated body, and text
+    after the terminator.
   - R1 must trip again after a push, with the review-round-2 line on its
     second firing for the same PR, and must name each unstamped PR of a
     multi-PR query.
@@ -774,12 +805,23 @@ R3 (follow-up PR):
 
   Every redirect is listed for review before merge. No rate is asserted (the
   revision 14 practice).
+- **Grader additions** (the instruction-eval grader can check neither of
+  these today):
+  - `expected.forbiddenDenials`: codes or `code:kind` entries that must not
+    appear in the run's denial log. It fails the run, for example on
+    `round-guard` or any Stop block.
+  - An optional `check.sh` per scenario, which the runner executes in the
+    fixture workspace after the run and before cleanup. Its exit status and
+    last output lines are saved beside the run's artifacts, and a nonzero
+    exit fails the run. A scenario without one is graded as before. Both
+    additions have unit tests on both sides.
 - **Live eval.** Both scenarios use a fixture repo with a local bare remote, a
   `gh` shim, and a validation rule duplicated in two functions.
   - `seam-review`: the shim's one review comment reports a symptom of one
-    copy. Graded on the `seam-redirect` entry being logged, the diff leaving
-    the rule with one owner (its literal appears in exactly one source file),
-    and no Stop block in the run.
+    copy. It is graded on three things: the `seam-redirect` entry being
+    logged; `check.sh` passing, which confirms the rule's literal appears in
+    exactly one source file; and `forbiddenDenials` containing no Stop
+    block.
   - `seam-push`: the task fixes the first comment and pushes, then the shim
     returns a second comment in the same class. Graded on the R2 entry, the
     second fix consolidating the rule, and no Stop block.
