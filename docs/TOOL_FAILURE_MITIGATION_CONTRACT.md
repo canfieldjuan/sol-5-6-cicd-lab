@@ -600,16 +600,38 @@ Definitions:
 
   `git push` and `git push origin HEAD` record no name, which is why the
   other two sources exist. Neither a base the session never named this way
-  (for example `main`) nor a whole working directory counts as owned.
+  nor a whole working directory counts as owned. `main` and `master` are
+  never own branches. A PR against them is the normal case, and sessions push
+  them in fixture setup. The noise replay found 4 false "stacked on main" R3
+  redirects before this rule.
 - **PR key**: the PR number named in the command, or `current` when none is
   named (`gh pr view --comments` on the checked-out branch).
+- **Repository namespacing.** One session often drives several repositories.
+  The reproduction session read another repository's PR in the same GraphQL
+  query. So every key carries where it belongs:
+  - **Branch keys** (push subjects, own branches, and `gh pr create`
+    `--base`/`--head`) are prefixed with the command's directory: `-C <dir>`,
+    then a leading `cd <dir>`, then the hook `cwd`. `pushesIn` reports that
+    directory for every push. Its `key` for named branches is unchanged, so
+    the parity with the Claude original holds.
+  - **PR keys** are prefixed with the repository the command states:
+    `--repo`/`-R`, a `repos/<o>/<r>/` path, a PR URL, or the
+    `repository(owner:, name:)` that encloses each `pullRequest(number:)` in a
+    GraphQL query. Without one, the PR key falls back to the command's
+    directory.
+
+  The hook cannot see a command's `workdir` (probe Q7). A session that
+  switches repositories only through `workdir`, never stating `cd`, `-C`, or
+  `--repo`, therefore still shares one directory key. That is the remaining
+  collision, and it can only add or drop a redirect, never block. The replay
+  passes the real `cwd`, so it measures the best case.
 
 The three triggers below are all context-only. None denies, blocks, rewrites,
 or records a pending redirect.
 
 | # | Trigger | Event | Fires when (all conditions) | Once per |
 |---|---|---|---|---|
-| R1 | review read | PostToolUse (the redirect arrives right after the findings) | A command segment is one of: `gh pr view [N]` with `--comments`; `gh pr view [N] --json` naming `comments`, `reviews`, or `latestReviews`; `gh api repos/<o>/<r>/pulls/<N>/(comments\|reviews)[/...]`; `gh api repos/<o>/<r>/issues/<N>/comments`; `gh api graphql` whose query names `pullRequest(number:<N>)` and `reviewThreads`, `reviews`, or `comments`; `codex-pr-status ... --pr <N>` | (PR key, push epoch) |
+| R1 | review read | PostToolUse (the redirect arrives right after the findings) | The output shows review text: a JSON response with a non-empty `body` anywhere, or non-empty output that is not JSON (for example `gh pr view --comments`). A JSON response with no `body` (a status check that happens to include `reviews`) and an empty output do not fire and consume no stamp. In the noise replay, 31 of 246 matching reads were JSON with no review text. The command segment is one of: `gh pr view [N]` with `--comments`; `gh pr view [N] --json` naming `comments`, `reviews`, or `latestReviews`; `gh api repos/<o>/<r>/pulls/<N>/(comments\|reviews)[/...]`; `gh api repos/<o>/<r>/issues/<N>/comments`; `gh api graphql` whose query names `pullRequest(number:<N>)` and `reviewThreads`, `reviews`, or `comments`; `codex-pr-status ... --pr <N>` | (PR key, push epoch) |
 | R2 | re-push | PreToolUse context (Q10: the push runs) | A push to a subject this session has already pushed at least once (round R >= 2), and no seam redirect has fired in the current epoch | (subject, push epoch) |
 | R3 | follow-up PR | PreToolUse context | `gh pr create` with `--base`/`-B` naming an own branch (stacked on own work); or `gh pr create` whose `--title`/`-t` matches `\b(fix(es\|ed)?\|follow[- ]?up\|regression\|revert\|repair\|restore\|correct)\b` (case-insensitive) after this session ran `gh pr merge` | (base or title, push epoch) |
 
@@ -783,6 +805,13 @@ R3 (follow-up PR):
     same script (the 01:03Z shape). `withoutHeredocs` has its own tests on
     both sides: quoted and bare words, `<<-`, an unterminated body, and text
     after the terminator.
+  - R1 must not trip on a JSON response with no `body`, or on an empty
+    output, and must trip on a later read in the same epoch that does carry
+    review text.
+  - Keys are namespaced: the same branch name pushed in two directories, the
+    same PR number in two stated repositories, and `--base feature` in
+    another directory must not affect each other. `--base main` and
+    `--base master` never count as stacked.
   - R1 must trip again after a push, with the review-round-2 line on its
     second firing for the same PR, and must name each unstamped PR of a
     multi-PR query.
