@@ -591,8 +591,16 @@ Definitions:
   parser defines a push. An attempted push counts, even if the remote rejects
   it. Hooks see each executed command, so the source-literal loop problem of
   revision 16 does not apply here.
-- **Own branch**: a push subject (the round guard's key) that this session has
-  pushed.
+- **Own branch**: a branch name this session has shown it owns, without
+  running git (SR4). Any one of these is enough:
+  - a named push subject (`git push origin <name>`);
+  - the `--head`/`-H` of a `gh pr create` the session ran;
+  - a branch the session created with `git checkout -b`/`-B`,
+    `git switch -c`/`-C`, or `git worktree add -b`/`-B`.
+
+  `git push` and `git push origin HEAD` record no name, which is why the
+  other two sources exist. Neither a base the session never named this way
+  (for example `main`) nor a whole working directory counts as owned.
 - **PR key**: the PR number named in the command, or `current` when none is
   named (`gh pr view --comments` on the checked-out branch).
 
@@ -655,6 +663,18 @@ the reproduction used (the `gh api .../pulls/<N>/comments` JSON fields, and
 concrete commands, such as `git log -L 120,120:src/x.py`. Otherwise it reads
 `git blame -L <line>,<line> <path>` for each finding. An output it cannot
 parse produces the generic form; it is not an error.
+
+Review-derived paths are untrusted (a PR can add any filename), and the model
+may run the command it is shown. So:
+- A path is always emitted single-quoted, unless it contains only
+  `[A-Za-z0-9_./@+-]`. A `'` inside it is written as `'\''`.
+- A path containing a control character or a backslash, longer than 200
+  characters, or starting with `-` is dropped. The line falls back to the
+  generic form.
+- The line number must be a positive integer.
+
+A malicious-path fixture (`;`, `$(...)`, a backtick, a newline, and a
+leading `-`) proves every case either quoted or dropped.
 
 R1 escalates by **review round**: the k-th R1 for one PR key in a session
 (at most one per epoch, so k counts the rounds in which that PR's review was
@@ -765,8 +785,11 @@ R3 (follow-up PR):
     the third push on. It must not trip on the first push, on a first push to
     a different subject, on `printf '... git push origin x ...' >> ledger`, or
     when R1 already fired in the epoch.
-  - R3 must trip on `--base <own branch>`, and on a fix-titled create after
-    `gh pr merge`. It must not trip on `--base main` with a feature title, or
+  - R3 must trip on `--base <own branch>` for each own-branch source (a
+    named push; the `--head` of an earlier `gh pr create`;
+    `git checkout -b`, `git switch -c`, and `git worktree add -b`), and on a
+    fix-titled create after `gh pr merge`. It must not trip on
+    `--base main` after only `git push origin HEAD` pushes. It must not trip on `--base main` with a feature title, or
     on a fix-titled create with no earlier merge in the session.
   - The output validates against the probe-verified context shapes (Q4 for
     PostToolUse, Q10 for PreToolUse).
