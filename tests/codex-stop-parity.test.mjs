@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { runStopGates } from "../hooks/codex-guards/guard.mjs";
+import { readRollout } from "../hooks/codex-guards/lib/rollout.mjs";
+import { roundVerdict } from "../hooks/codex-guards/stop/round-guard.mjs";
 import { R } from "./codex-rollout-rows.mjs";
 
 // Parity with the Claude originals (contract 5.3). Each case states the verdict
@@ -74,7 +76,8 @@ const ROUND_CASES = [
   { pushes: Array(10).fill(["git push -u origin feat", "/r"]), fires: { branch: "feat", count: 10 } },
   { pushes: [["git push", "/r/a"], ["git push", "/r/b"], ["git push", "/r/c"], ["git push", "/r/d"], ["git push", "/r/a"]], fires: null, note: "bare pushes keyed by directory (revision 15; Claude since 17)" },
   { pushes: Array(5).fill(["git push", "/r/a"]), fires: { branch: "<current-branch>@/r/a", count: 5 }, note: "bare pushes in one directory" },
-  { pushes: [...Array(4).fill(["git push origin feat", "/r"]), ...Array(4).fill(["printf '%s' 'fixed; git push origin feat' >> L", "/r"])], fires: null, note: "text is not a push (revision 16; Claude since 17)" }
+  { pushes: [...Array(4).fill(["git push origin feat", "/r"]), ...Array(4).fill(["printf '%s' 'fixed; git push origin feat' >> L", "/r"])], fires: null, note: "text is not a push (revision 16; Claude since 17)" },
+  { pushes: [...Array(4).fill(["git push origin feat", "/r"]), ["cat > deploy.sh <<'EOF'\ngit push origin feat\nEOF\nchmod +x deploy.sh", "/r"]], fires: null, note: "a push line in a heredoc body is not a push (revision 18; Claude since 17)" }
 ];
 
 function runClaudeRound(dir, pushes, n) {
@@ -92,11 +95,11 @@ function runClaudeRound(dir, pushes, n) {
 async function runCodexRound(dir, pushes, n) {
   const file = path.join(dir, `codex-round-${n}.jsonl`);
   await writeFile(file, [R.turn("t"), ...pushes.map(([cmd, workdir], i) => R.exec([{ cmd, workdir }], `p${i}`))].join("\n") + "\n");
-  const finding = runStopGates({ transcript_path: file, stop_hook_active: false }, {}, "/h").findings.find((f) => f.code === "round-guard");
-  if (!finding) return null;
-  // Compare the subject key (the stamp minus its tier); the Codex reason words
-  // a directory-keyed subject for the reader instead of printing the key.
-  return { branch: finding.stamp.replace(/:\d+$/, ""), count: Number(/(\d+) pushes to/.exec(finding.reason)[1]) };
+  // Revision 18: the round guard no longer runs at Stop, so its counter is
+  // compared directly on the rollout's commands. Subjects and counts are what
+  // the parity holds; the Codex side's wording left with the Stop checkpoint.
+  const verdict = roundVerdict(readRollout(file).commands);
+  return verdict ? { branch: verdict.branch, count: verdict.count } : null;
 }
 
 test("parity: round guard verdicts match the Claude original on every case", async (t) => {

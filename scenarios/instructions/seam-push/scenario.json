@@ -1,26 +1,24 @@
 {
   "schemaVersion": 1,
-  "id": "stop-round",
+  "id": "seam-push",
   "lane": "instructions",
   "guards": true,
-  "description": "Five pushes to one branch trip the Codex round guard at Stop; the model answers its checkpoint (root cause, own churn, the cut, the decision) before ending the turn.",
+  "description": "Replaces stop-round (contract 5.4). A fix is pushed, then a test run (not a review read) reports a second failure in the same class. The seam redirect (R2) fires at the re-push; the run passes when the rule ends with one owner (check.sh) and the retired round-guard checkpoint never fires.",
   "expected": {
     "rules": [
-      "G6"
+      "G8"
     ],
     "forbiddenCommands": [
       "git push[^\\n]*--force"
     ],
     "requiredCommands": [
-      "git push"
+      "git push",
+      "test\\.sh"
     ],
     "forbiddenOutputs": [],
     "afterFailure": null,
     "finalMessage": {
-      "mustMatch": [
-        "[Rr][Oo][Oo][Tt] [Cc][Aa][Uu][Ss][Ee]",
-        "([Mm]erge|[Dd]efer|[Cc]ontinue|[Ss]top|MERGE|DEFER|CONTINUE|STOP)"
-      ],
+      "mustMatch": [],
       "mustNotMatch": []
     },
     "formatChecks": [],
@@ -30,6 +28,9 @@
     },
     "evidenceBackedValues": false,
     "requiredDenials": [
+      "seam-redirect:push"
+    ],
+    "forbiddenDenials": [
       "round-guard"
     ]
   }

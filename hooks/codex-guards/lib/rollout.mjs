@@ -86,7 +86,7 @@ function functionCommands(argumentsText) {
 
 // Revision 16: a CommandExecution row is one command that actually ran, with
 // its argv and real cwd. The script of a -c/-lc shell argv is the command.
-function executedCommand(item) {
+export function executedCommand(item) {
   const argv = Array.isArray(item.command) ? item.command.map(String) : null;
   const cmd = argv ? (argv.length >= 3 && /^-l?c$/.test(argv[argv.length - 2]) ? argv[argv.length - 1] : argv.join(" ")) : String(item.command ?? "");
   let workdir = typeof item.cwd === "string" ? item.cwd : null;

@@ -160,6 +160,14 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
     const trustFlag = scenario.guards ? ["--dangerously-bypass-hook-trust"] : [];
     const result = await runProcess(codexBin, ["exec", "--json", "--skip-git-repo-check", ...trustFlag, prompt],
       { cwd: fixture, env, timeoutMs, stdoutFile: eventsFile });
+    // Contract 5.4: a scenario's check.sh inspects the workspace the run left,
+    // before cleanup; its result is graded with the run.
+    const checkFile = `${artifactBase}.check.json`;
+    try {
+      await readFile(path.join(scenarioDir, "check.sh"));
+      const check = spawnSync("bash", [path.join(scenarioDir, "check.sh")], { cwd: fixture, env, encoding: "utf8", timeout: 60000 });
+      await writeFile(checkFile, JSON.stringify({ exitCode: check.status ?? 1, output: `${check.stdout ?? ""}${check.stderr ?? ""}`.slice(-2000) }) + "\n");
+    } catch {}
     if (scenario.guards) {
       try { await copyFile(path.join(guardState, "denials.jsonl"), denialsFile); } catch { await writeFile(denialsFile, ""); }
       // Keep what a guard miss needs for diagnosis: the guard's error log and
@@ -176,7 +184,7 @@ export async function runOne({ scenarioDir, armText, stateRoot, codexBin = "code
       return { status: "error", reason, fatal: /usage limit/i.test(streamError ?? "") };
     }
     try {
-      const graded = await gradeFiles(scenarioDir, eventsFile, shimLog, scenario.guards ? denialsFile : null);
+      const graded = await gradeFiles(scenarioDir, eventsFile, shimLog, scenario.guards ? denialsFile : null, `${artifactBase}.check.json`);
       const status = graded.exercised === false && graded.pass ? "unexercised" : graded.pass ? "pass" : "fail";
       // A failed run whose required guard never fired must say so; otherwise a
       // guard miss hides behind the other failures.
@@ -229,7 +237,7 @@ export async function regrade(batchDir) {
     try {
       let denials = file.replace(/\.jsonl$/, ".denials.jsonl");
       try { await readFile(denials); } catch { denials = null; }
-      const graded = await gradeFiles(scenarioDir, file, file.replace(/\.jsonl$/, ".gh.log"), denials);
+      const graded = await gradeFiles(scenarioDir, file, file.replace(/\.jsonl$/, ".gh.log"), denials, file.replace(/\.jsonl$/, ".check.json"));
       const status = graded.exercised === false && graded.pass ? "unexercised" : graded.pass ? "pass" : "fail";
       results.push({ scenario, arm, run: Number(match[2]), status, failures: graded.failures, formatMisses: graded.formatMisses, usage: graded.usage });
     } catch (error) {
