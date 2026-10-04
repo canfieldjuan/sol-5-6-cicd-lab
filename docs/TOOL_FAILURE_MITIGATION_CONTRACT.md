@@ -591,19 +591,20 @@ Definitions:
   parser defines a push. An attempted push counts, even if the remote rejects
   it. Hooks see each executed command, so the source-literal loop problem of
   revision 16 does not apply here.
-- **Own branch**: a branch name this session has shown it owns, without
-  running git (SR4). Any one of these is enough:
-  - a named push subject (`git push origin <name>`);
+- **Own branch**: a branch this session created or opened a PR from,
+  learned without running git (SR4). Either is enough:
   - the `--head`/`-H` of a `gh pr create` the session ran;
   - a branch the session created with `git checkout -b`/`-B`,
     `git switch -c`/`-C`, or `git worktree add -b`/`-B`.
 
-  `git push` and `git push origin HEAD` record no name, which is why the
-  other two sources exist. Neither a base the session never named this way
-  nor a whole working directory counts as owned. `main` and `master` are
-  never own branches. A PR against them is the normal case, and sessions push
-  them in fixture setup. The noise replay found 4 false "stacked on main" R3
-  redirects before this rule.
+  A push alone is not proof of ownership. Sessions push shared branches too:
+  a default branch such as `develop` or `trunk` in maintenance, and `main` in
+  fixture setup. The noise replay found 4 false "stacked on main" R3
+  redirects when named pushes counted. `main` and `master` are also never
+  own branches, even when created, since a PR against them is the normal
+  case. Neither an unnamed base nor a whole working directory counts as
+  owned. The reproduction is still covered: its stacked base was the
+  `--head` of a PR the same session had opened.
 - **PR key**: the PR number named in the command, or `current` when none is
   named (`gh pr view --comments` on the checked-out branch).
 - **Repository namespacing.** One session often drives several repositories.
@@ -633,7 +634,7 @@ or records a pending redirect.
 |---|---|---|---|---|
 | R1 | review read | PostToolUse (the redirect arrives right after the findings) | The output shows review text: a JSON response with a non-empty `body` anywhere, or non-empty output that is not JSON (for example `gh pr view --comments`). A JSON response with no `body` (a status check that happens to include `reviews`) and an empty output do not fire and consume no stamp. In the noise replay, 31 of 246 matching reads were JSON with no review text. The command segment is one of: `gh pr view [N]` with `--comments`; `gh pr view [N] --json` naming `comments`, `reviews`, or `latestReviews`; `gh api repos/<o>/<r>/pulls/<N>/(comments\|reviews)[/...]`; `gh api repos/<o>/<r>/issues/<N>/comments`; `gh api graphql` whose query names `pullRequest(number:<N>)` and `reviewThreads`, `reviews`, or `comments`; `codex-pr-status ... --pr <N>` | (PR key, push epoch) |
 | R2 | re-push | PreToolUse context (Q10: the push runs) | A push to a subject this session has already pushed at least once (round R >= 2), and no seam redirect has fired in the current epoch | (subject, push epoch) |
-| R3 | follow-up PR | PreToolUse context | `gh pr create` with `--base`/`-B` naming an own branch (stacked on own work); or `gh pr create` whose `--title`/`-t` matches `\b(fix(es\|ed)?\|follow[- ]?up\|regression\|revert\|repair\|restore\|correct)\b` (case-insensitive) after this session ran `gh pr merge` | (base or title, push epoch) |
+| R3 | follow-up work on own work | PreToolUse context | Earliest, before any work: a branch created with an own branch as its start point (`git checkout -b <new> <own>`, `git switch -c <new> <own>`, or `git worktree add -b <new> <path> <own>`). Then at the PR: `gh pr create` with `--base`/`-B` naming an own branch (stacked on own work), or `gh pr create` whose `--title`/`-t` matches `\b(fix(es\|ed)?\|follow[- ]?up\|regression\|revert\|repair\|restore\|correct)\b` (case-insensitive) after this session ran `gh pr merge`. A context-only hook cannot stop the create (Q10), so the PR-time text is written for after the PR exists | (start point, base, or title; push epoch) |
 
 All three parse with `segments` from `lib/shell.mjs`. Quoted text, `echo` and
 `printf` arguments, heredoc bodies, and session-ledger appends are not
@@ -720,11 +721,17 @@ R2 (re-push of push R to `<label>`):
 - R = 2: `[seam-redirect] Push 2 to <label> is a fix round on your own change. If this fix added a case beside an existing one, move the rule to one owner in the next commit; trace it with git blame -L or git log -L first.`
 - R >= 3: `[seam-redirect] Push <R> to <label>: <R-1> fix rounds on one change. Findings that keep arriving in one class mean the rule lives in more than one place. Next commit: trace the class to the change that introduced it and consolidate it at one owner, instead of fixing the next finding by itself.`
 
-R3 (follow-up PR):
+R3, at a branch started from own work (before any work exists):
 
 ```
-[seam-redirect] This PR repairs this session's own work (<base branch or merged PR>). Put the fix where the defect came from:
-- If <base> is not merged yet, commit the fix on <base> instead of stacking a new PR on it.
+[seam-redirect] <new> starts from this session's own unmerged work (<own>). If it fixes a defect <own> introduced, commit the fix on <own> instead of a new branch, so the fix lands where the defect came from.
+```
+
+R3, at the PR (the call runs, so the PR exists when this arrives):
+
+```
+[seam-redirect] This PR repairs this session's own work (<stacked on <base> | a fix after this session merged a PR>). Put the fix where the defect came from:
+- If <base> is not merged yet, move the fix onto <base> and close this PR as superseded.
 - If it merged, fix the rule at its owner and name the introducing commit in the PR body.
 ```
 
@@ -822,11 +829,13 @@ R3 (follow-up PR):
     a different subject, on `printf '... git push origin x ...' >> ledger`,
     on a `git push` line inside a heredoc body, or when R1 already fired in
     the epoch.
-  - R3 must trip on `--base <own branch>` for each own-branch source (a
-    named push; the `--head` of an earlier `gh pr create`;
-    `git checkout -b`, `git switch -c`, and `git worktree add -b`), and on a
-    fix-titled create after `gh pr merge`. It must not trip on
-    `--base main` after only `git push origin HEAD` pushes. It must not trip on `--base main` with a feature title, or
+  - R3 must trip on `--base <own branch>` for each own-branch source (the
+    `--head` of an earlier `gh pr create`; `git checkout -b`,
+    `git switch -c`, and `git worktree add -b`), and on a fix-titled create
+    after `gh pr merge`. It must trip at branch creation from an own start
+    point, before any PR. It must not trip on `--base develop` after
+    `git push origin develop`, on `--base main` after only
+    `git push origin HEAD` pushes, on `--base main` with a feature title, or
     on a fix-titled create with no earlier merge in the session.
   - The output validates against the probe-verified context shapes (Q4 for
     PostToolUse, Q10 for PreToolUse).
