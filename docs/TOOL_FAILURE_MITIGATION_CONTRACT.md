@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 18; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-17, and by revision 18 if accepted (the round guard leaves Stop); section 5.4 (step 6, seam redirect) PROPOSED in revision 18. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 18; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-17, and by revision 18 if accepted (the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -511,7 +511,7 @@ checkpoint question at 5, 10, 15, and 20 pushes per branch. Neither ends a
 turn. (Revision 18 retires the fix-loop checkpoint in favor of the seam
 redirects in section 5.4.)
 
-## 5.4 Step-6 specification: seam redirect (revision 18; proposed)
+## 5.4 Step-6 specification: seam redirect (revision 18; accepted in PR #30)
 
 ### Reproduction (2026-10-04)
 
@@ -630,9 +630,20 @@ concrete commands, such as `git log -L 120,120:src/x.py`. Otherwise it reads
 `git blame -L <line>,<line> <path>` for each finding. An output it cannot
 parse produces the generic form; it is not an error.
 
+R1 escalates by **review round**: the k-th R1 for one PR key in a session
+(at most one per epoch, so k counts the rounds in which that PR's review was
+read). From k = 2, R1 adds one line after the header: `Review round <k> on
+PR #<N>: findings that keep arriving in one class mean the rule lives in more
+than one place. Consolidate it at one owner in the next commit, instead of
+fixing the next finding by itself.` In the reproduction, every round starts
+with a review read, so R1 is what reaches the model each round; R2's
+one-per-epoch rule keeps it quiet in those rounds. A command that reads
+several PRs (a GraphQL query with several `pullRequest(number:N)`) is keyed
+by each number; the redirect names the PRs not yet stamped in the epoch.
+
 R2 (re-push of push R to `<label>`):
 - R = 2: `[seam-redirect] Push 2 to <label> is a fix round on your own change. If this fix added a case beside an existing one, move the rule to one owner in the next commit; trace it with git blame -L or git log -L first.`
-- R >= 3: `[seam-redirect] Push <R> to <label>: <R-1> fix rounds on one change. Findings that keep arriving in one class mean the rule lives in more than one place. Next commit: trace the class to the change that introduced it and consolidate it at one owner, instead of answering the next finding by itself.`
+- R >= 3: `[seam-redirect] Push <R> to <label>: <R-1> fix rounds on one change. Findings that keep arriving in one class mean the rule lives in more than one place. Next commit: trace the class to the change that introduced it and consolidate it at one owner, instead of fixing the next finding by itself.`
 
 R3 (follow-up PR):
 
@@ -686,7 +697,10 @@ R3 (follow-up PR):
   `{code: "seam-redirect", kind: "review" | "push" | "followup"}`, so step 5
   can measure whether loops still reach 5 pushes on one subject.
 - **SR7 No shortcut menu.** No redirect offers merge, defer, or stop as an
-  option.
+  option, and none asks for a reply. Mechanically: no redirect text matches
+  `\?` or the whole words `\b(answer|reply|recommend|merge|defer|stop)\b`
+  (case-insensitive). Describing a branch's state ("merged", "not merged
+  yet") is not offering a merge, and does not match.
 
 ### Concurrency model
 
@@ -711,7 +725,9 @@ R3 (follow-up PR):
     `gh pr view N --json state,headRefOid`, `gh pr checks N`, `gh pr list`,
     `echo "gh pr view 12 --comments"`, a heredoc body containing the command,
     or a second read of the same PR in the same epoch.
-  - R1 must trip again after a push.
+  - R1 must trip again after a push, with the review-round-2 line on its
+    second firing for the same PR, and must name each unstamped PR of a
+    multi-PR query.
   - R1 must fill concrete trace commands from both observed review-output
     shapes, and fall back to the generic form on output it cannot parse.
   - R2 must trip on the second push to a subject, with the R >= 3 text from
@@ -724,8 +740,9 @@ R3 (follow-up PR):
   - The output validates against the probe-verified context shapes (Q4 for
     PostToolUse, Q10 for PreToolUse).
 - **Redirect only.** Across the unit fixtures:
-  - no redirect text contains `?`, "answer", "reply", "recommend", "merge",
-    or "defer";
+  - no redirect text matches the SR7 patterns, for every template and
+    every escalation (R1 at k = 1 and 2, R2 at R = 2 and 3, R3 both
+    branches);
   - `runStopGates` returns no round-guard finding for rollouts with 5, 10,
     and 20 pushes to one branch;
   - the evidence-gate tests and the parity test (now calling the counter
@@ -737,10 +754,17 @@ R3 (follow-up PR):
     carries it);
   - each redirect is printed with its row's timestamp.
 
-  On the reproduction rollout, three redirects must fire before push 3: R3
-  at the stacked PR create (01:03Z), R1 at the first review read of PR A
-  (01:26Z), and R2 at push 2 (01:29Z). The replay also reports which
-  redirect fired at each of PR A's pushes. The rollout is private and stays
+  On the reproduction rollout:
+  - R3 must fire at the stacked PR create (01:03Z);
+  - R1 must fire at the first review read of PR A (01:26Z), before push 2
+    (01:29Z);
+  - R2 must not fire at push 2, because R1 already fired in that epoch;
+  - R1 with the review-round-2 line must fire at the next review read
+    (03:42Z), before push 3 (04:46Z). The old checkpoint fired after push 5
+    (06:15:13Z).
+
+  The replay also reports which redirect, if any, fired in each of PR A's
+  epochs. The rollout is private and stays
   local: the test skips with a visible message when it is absent, as the
   parity test does for `~/.claude/hooks`.
 - **Noise replay.** Replay the 20 most recent rollouts and report:
@@ -812,6 +836,8 @@ step-5 trim candidate.
     one extra redirect.
   - Missing or malformed session state is treated as empty, which costs at
     most one repeated redirect.
+  - A review read that finds nothing new still counts as a review round, so
+    R1's escalation line can come one round early.
   - R1's best-effort parse of review output can fill a wrong path or line if
     a review shape changes. The redirect still names the action, and the
     model runs the trace command itself, so a wrong guess costs one failed
@@ -832,8 +858,9 @@ step-5 trim candidate.
   block and passes one that should not.
 - **Step 5**: an analyzer delta per class on sessions after install, and
   AGENTS.md rules listed as relocation/removal candidates.
-- **Step 6**: each seam redirect is proven on both sides. Three redirects
-  fire before push 3 on the reproduction rollout. Nothing in the seam path
+- **Step 6**: each seam redirect is proven on both sides. On the
+  reproduction rollout, the first redirect fires before push 2 and the
+  escalated one before push 3. Nothing in the seam path
   runs at Stop. The noise replay is listed for review, and the live eval
   reports the acted-on rate.
 
