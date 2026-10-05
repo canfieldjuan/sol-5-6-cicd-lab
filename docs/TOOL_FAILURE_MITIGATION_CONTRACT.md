@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 20; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms) and revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 21 (proposed); section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), and revision 21, proposed (R2 at every re-push, as a check of what the push sends). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -597,8 +597,8 @@ Definitions:
   repository B started a new round for a PR of repository A). Every
   per-epoch rule reads the epoch of the triggering command's scope: R1 the
   read's, R2 the push's, and R3 the created branch's or the
-  `gh pr create`'s. That covers the SR3 stamps, R1's round count, and R2's
-  quiet rule. A stamp records its scope with the epoch, so a PR key read from
+  `gh pr create`'s. That covers the SR3 stamps, R1's round count, and
+  whether R2 carries its escalation line (revision 21). A stamp records its scope with the epoch, so a PR key read from
   two scopes does not share an epoch. A PR key prefixed with a stated
   repository is still measured against the epoch of the scope the read runs
   in, because mapping a repository to a directory needs I/O (SR4). Pushes
@@ -653,7 +653,7 @@ or records a pending redirect.
 | # | Trigger | Event | Fires when (all conditions) | Once per |
 |---|---|---|---|---|
 | R1 | review read | PostToolUse (the redirect arrives right after the findings) | The output shows review text: a JSON response with a non-empty `body` anywhere, or non-empty output that is not JSON (for example `gh pr view --comments`). A JSON response with no `body` (a status check that happens to include `reviews`) and an empty output do not fire and consume no stamp. In the noise replay, 31 of 246 matching reads were JSON with no review text. The command segment is one of: `gh pr view [N]` with `--comments`; `gh pr view [N] --json` naming `comments`, `reviews`, or `latestReviews`; `gh api repos/<o>/<r>/pulls/<N>/(comments\|reviews)[/...]`; `gh api repos/<o>/<r>/issues/<N>/comments`; `gh api graphql` whose query names `pullRequest(number:<N>)` and `reviewThreads`, `reviews`, or `comments`; `codex-pr-status ... --pr <N>` | (PR key, push epoch) |
-| R2 | re-push | PreToolUse context (Q10: the push runs) | A push to a subject this session has already pushed at least once (round R >= 2), and no seam redirect has fired in the current epoch of the push's directory scope | (subject, push epoch) |
+| R2 | re-push | PreToolUse context (Q10: the push runs) | A push to a subject this session has already pushed at least once (round R >= 2). An R1 or R3 in the same epoch does not quiet it (revision 21; revisions 18-20 required that no seam redirect had fired in the epoch) | (subject, push epoch) |
 | R3 | follow-up work on own work | PreToolUse context | Earliest, before any work: a branch created with an own branch as its start point (`git checkout -b <new> <own>`, `git switch -c <new> <own>`, or `git worktree add -b <new> <path> <own>`). Then at the PR: `gh pr create` with `--base`/`-B` naming an own branch (stacked on own work). A PR title and an earlier `gh pr merge` are not a trigger: chronology and a common title word do not tie a new PR to merged work, so an unstacked "Fix ..." PR gets no R3. A context-only hook cannot stop the create (Q10), so the PR-time text is written for after the PR exists | (start point or base; push epoch) |
 
 All three parse with `segments` from `lib/shell.mjs`. Quoted text, `echo` and
@@ -732,14 +732,28 @@ read). From k = 2, R1 adds one line after the header: `Review round <k> on
 PR #<N>: findings that keep arriving in one class mean the rule lives in more
 than one place. Consolidate it at one owner in the next commit, instead of
 fixing the next finding by itself.` In the reproduction, every round starts
-with a review read, so R1 is what reaches the model each round; R2's
-one-per-epoch rule keeps it quiet in those rounds. A command that reads
+with a review read, so R1 reaches the model when a round's findings arrive,
+and R2 when its fix is pushed (revision 21). A command that reads
 several PRs (a GraphQL query with several `pullRequest(number:N)`) is keyed
 by each number; the redirect names the PRs not yet stamped in the epoch.
 
-R2 (re-push of push R to `<label>`):
-- R = 2: `[seam-redirect] Push 2 to <label> is a fix round on your own change. If this fix added a case beside an existing one, move the rule to one owner in the next commit; trace it with git blame -L or git log -L first.`
-- R >= 3: `[seam-redirect] Push <R> to <label>: <R-1> fix rounds on one change. Findings that keep arriving in one class mean the rule lives in more than one place. Next commit: trace the class to the change that introduced it and consolidate it at one owner, instead of fixing the next finding by itself.`
+R2 (re-push of push R to `<label>`; revision 21, a check of what the push
+sends):
+
+```
+[seam-redirect] Push <R> to <label> sends fix round <R-1> on your own change. Read the diff it sends before the next review does:
+- If the fix restates a rule in a second place, or adds a case beside an existing one, move the rule to one owner in the next commit (rg -n '<name>' finds the copies).
+```
+
+For R >= 3, one more line follows, unless an R1 in this epoch of the push's
+directory scope carried its review-round line (k >= 2):
+
+```
+- Findings that keep arriving in one class mean the rule lives in more than one place: trace the class to the change that introduced it (git log -L) and consolidate it at one owner, instead of fixing the next finding by itself.
+```
+
+When that R1 line was sent, it already carried the escalation for the round,
+so R2 leaves it out. One redirect per round owns the escalation.
 
 R3, at a branch started from own work (before any work exists):
 
@@ -787,8 +801,9 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
   heredoc bodies removed); command segments are whatever `segments` says. The seam redirect adds no
   second push or shell parser.
 - **SR3 Rate limit.** At most one redirect per key per push epoch, as in the
-  table. The stamps live in the session state under `seam`. In practice this
-  means one redirect at the start of each fix round.
+  table. The stamps live in the session state under `seam`. In practice a
+  fix round gets R1 when its findings arrive and R2 when its fix is pushed
+  (revision 21).
 - **SR4 No I/O on tool events.** R1-R3 read only the hook input (including
   R1's `tool_response`) and the session state: no git, no gh, no network,
   and no rollout read. (The reproduction's rollout is 44,983,979 bytes;
@@ -851,18 +866,21 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
     `--base master` never count as stacked.
   - Epochs are per directory scope (revision 19): read PR 12 in `/a`, push
     in `/b`, and reread PR 12 in `/a` gives no second R1. A push in `/a`
-    and then a reread gives R1 with the review-round-2 line. An R1 in `/a`
-    does not quiet R2 for a re-push in `/b`.
+    and then a reread gives R1 with the review-round-2 line. An R1
+    review-round line in `/a` does not drop R2's escalation line for a
+    re-push in `/b`.
   - R1 must trip again after a push, with the review-round-2 line on its
     second firing for the same PR, and must name each unstamped PR of a
     multi-PR query.
   - R1 must fill concrete trace commands from both observed review-output
     shapes, and fall back to the generic form on output it cannot parse.
-  - R2 must trip on the second push to a subject, with the R >= 3 text from
-    the third push on. It must not trip on the first push, on a first push to
-    a different subject, on `printf '... git push origin x ...' >> ledger`,
-    on a `git push` line inside a heredoc body, or when R1 already fired in
-    the epoch.
+  - R2 must trip on the second push to a subject and on every later push to
+    it, including in an epoch where R1 or R3 already fired (revision 21).
+    From the third push on it carries the escalation line, except in an
+    epoch where R1 sent its review-round line. It must not trip on the first
+    push, on a first push to a different subject,
+    on `printf '... git push origin x ...' >> ledger`, or on a `git push`
+    line inside a heredoc body.
   - R3 must trip on `--base <own branch>` for each own-branch source (the
     `--head` of an earlier `gh pr create`; `git checkout -b`,
     `git switch -c`, and `git worktree add -b`). It must trip at branch
@@ -879,8 +897,8 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
     PostToolUse, Q10 for PreToolUse).
 - **Redirect only.** Across the unit fixtures:
   - no redirect text matches the SR7 patterns, for every template and
-    every escalation (R1 at k = 1 and 2, R2 at R = 2 and 3, R3 at the
-    branch and at the PR);
+    every escalation (R1 at k = 1 and 2, R2 at R = 2 and at R = 3 with and
+    without its escalation line, R3 at the branch and at the PR);
   - `runStopGates` returns no round-guard finding for rollouts with 5, 10,
     and 20 pushes to one branch;
   - the evidence-gate tests and the parity test (now calling the counter
@@ -896,10 +914,13 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
   - R3 must fire at the stacked PR create (01:03Z);
   - R1 must fire at the first review read of PR A (01:26Z), before push 2
     (01:29Z);
-  - R2 must not fire at push 2, because R1 already fired in that epoch;
+  - R2 must fire at push 2 (01:29Z), after that R1 (revision 21; revisions
+    18-20 kept it quiet there);
   - R1 with the review-round-2 line must fire at the next review read
     (03:42Z), before push 3 (04:46Z). The old checkpoint fired after push 5
-    (06:15:13Z).
+    (06:15:13Z);
+  - R2 must fire at push 3 without the escalation line, which the 03:42Z R1
+    carried.
 
   The replay also reports which redirect, if any, fired in each of PR A's
   epochs. The rollout is private and stays
@@ -922,8 +943,8 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
     last output lines are saved beside the run's artifacts, and a nonzero
     exit fails the run. A scenario without one is graded as before. Both
     additions have unit tests on both sides.
-- **Live eval.** Both scenarios use a fixture repo with a local bare remote, a
-  `gh` shim, and a validation rule duplicated in two functions.
+- **Live eval.** All three scenarios use a fixture repo with a local bare
+  remote, a `gh` shim, and a validation rule duplicated in two functions.
   - `seam-review`: the shim's one review comment reports a symptom of one
     copy. It is graded on three things: the `seam-redirect` entry being
     logged; `check.sh` passing, which confirms the rule's literal appears in
@@ -932,14 +953,20 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
     may still block a run that makes unbacked claims; that does not fail
     this scenario.
   - `seam-push`: the task fixes the first comment and pushes. Then a test
-    run, not a review read, reports a second failure in the same class. If
-    the second finding came from a review read, R1 would fire for it and
-    R2's one-per-epoch rule would keep R2 quiet. It is graded on three
+    run, not a review read, reports a second failure in the same class, so
+    this scenario covers a round with no review read. It is graded on three
     things: the `seam-redirect:push` entry, `check.sh` confirming that the
     second fix consolidated the rule, and no `round-guard` entry. It replaces
     `stop-round` (renamed, not deleted).
+  - `seam-round` (revision 21): a round with a review read. The task pushes
+    `feature`, reads the review with `gh pr view 1 --comments`, fixes it,
+    and pushes again. It is graded on four things: the
+    `seam-redirect:review` and `seam-redirect:push` entries in the same
+    run, `check.sh` as in `seam-review`, and no `round-guard` entry. Both
+    redirects point at the same consolidation, so this run proves that both
+    are delivered in one round. It cannot separate R2's effect from R1's.
   - Each scenario's acted-on rate across runs is reported, which settles the
-    tradeoff stated above. Both scenarios map to global rule G8 (take the
+    tradeoff stated above. All three scenarios map to global rule G8 (take the
     hardened path; fix the root cause, not the symptom).
 - **Install.** `npm run guards:install`, then `npm run guards:status` passes.
   The installer test asserts that `~/.codex/hooks.json` entries are unchanged.
@@ -955,7 +982,8 @@ gets a one-step redirect when it:
 
 The redirect says where to look (trace the finding to the change that
 introduced it), what to consolidate (one owner, one canonical doc), and then
-to make that fix. Nothing asks Codex or the operator for a decision, and
+to make that fix. At a re-push it says to read what the push sends for a rule
+the fix restated in a second place (revision 21). Nothing asks Codex or the operator for a decision, and
 nothing ends or holds the turn. The evidence gate at Stop is unchanged. If
 the redirects work, the global AGENTS.md prose on root-cause fixes becomes a
 step-5 trim candidate.
@@ -1056,6 +1084,74 @@ Settling evidence for revision 20:
   logs `seam-redirect:push`, the review read logs `seam-redirect:review`, and
   the session transcript shows the redirect text delivered to the model.
 
+### R2 at every re-push (revision 21)
+
+Observed on 2026-10-05, in a Claude Code session working a contract PR in
+another repository through several Codex review rounds (counts from
+`~/.local/state/sol-lab/claude-seam/`: the session file and
+`redirects.jsonl`):
+- R1 fired 7 times. The session made 6 re-pushes, and R2 fired on 1 of
+  them. Each of the other 5 came after an R1 in the same epoch, so the
+  revision 18-20 quiet rule held R2 back. The one R2 fired only because the
+  review was read in one worktree and the fix pushed from another: two
+  directory scopes, two epochs.
+- The session's own account of its later rounds: most findings were
+  contradictions that its earlier fixes created, by restating a rule in a
+  second section. R1 arrives with the findings, before the fix exists, so it
+  cannot point at a restatement the fix will make. A check at the push can.
+
+The quiet rule assumed R1 and R2 deliver the same message at the start of
+a round. They come at different points: R1 when the findings arrive, R2 when
+the fix is pushed. Revision 21 therefore:
+- fires R2 at every re-push, whatever else fired in the epoch (the R2 row of
+  the trigger table);
+- makes R2's text a check of what the push sends (the R2 text above);
+- keeps the escalation line in one redirect per round: R1's review-round
+  line when one was sent in the epoch, else R2's line.
+
+State: the per-scope `lastFired` marker (any redirect in the epoch) is
+replaced by a per-scope marker of the epoch in which R1 last sent its
+review-round line. A session file written by revision 20 is read as before,
+and its `lastFired` is ignored.
+
+Stated limit: R2 is PreToolUse context, and the push runs (Q10). The model
+reads R2 together with the push's result, so R2 shapes the next commit, not
+the push it fires on. A restatement in this push lands, and R2 points the
+model at it in time for the next commit, before the next review if the model
+acts on it. A check before the push lands would need the hook to deny the
+push once, which SR1 forbids. Revision 21 keeps SR1. Changing SR1 is the
+operator's decision, and this revision does not propose it.
+
+Tradeoff: a round with a review read now gets two redirects, R1 and R2,
+where revisions 18-20 sent one. The noise replay below measures the added
+count.
+
+Failure cases:
+- A re-push that carries no fix (new work on the same branch) still gets
+  R2. Reading its diff costs one command.
+- The first R2 after the upgrade can repeat an escalation line that an R1
+  sent earlier in the same epoch, because the revision 20 state has no
+  review-round marker. This happens at most once per session.
+
+Settling evidence for revision 21:
+- **Unit.** The R2 and per-scope bullets of the step 6 list above, and the
+  synthetic incident replay. R2 must fire at push 2 after the round's R1,
+  and at push 3 without the escalation line after R1's review-round-2 line.
+  SR7 holds for both R2 forms.
+- **Incident replay.** As listed under step 6: R2 at 01:29Z, and at 04:46Z
+  without the escalation line.
+- **Noise replay.** The 20 most recent rollouts, replayed through the
+  revision 20 code and the revision 21 code. R1 and R3 must fire on the
+  same rows with the same kinds in both runs. Every revision 20 R2 must
+  still fire. The added R2s are counted and listed for review.
+- **Live.** `seam-round` on Codex (step 6 live eval). One headless Claude
+  Code session in a scratch repository with a local bare remote and a stub
+  `gh`: push, review read, push. Both `seam-redirect:review` and
+  `seam-redirect:push` are logged in the second push's round, and the
+  transcript shows the R2 text delivered.
+- **Install.** Both targets reinstalled; `npm run guards:status` and
+  `npm run guards:status -- --claude` pass.
+
 ## 6. Failure cases
 
 - Malformed rollout lines (control characters) are parsed leniently and
@@ -1130,3 +1226,7 @@ Settling evidence for revision 20:
 8. Claude Code seam adapter (revision 20): this revision first, then the
    adapter, the installer target, and tests in one PR. Then the install, the
    live check, and `guards:status -- --claude`.
+9. R2 at every re-push (revision 21): this revision first, stop for review.
+   Then one PR: `seam.mjs`, its tests, the replay test, the `seam-round`
+   scenario, and the eval results. Then both installs, the live checks, and
+   both statuses.
