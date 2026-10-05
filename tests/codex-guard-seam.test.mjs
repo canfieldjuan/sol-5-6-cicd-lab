@@ -8,7 +8,7 @@ import { branchText, createdBranches, emptySeam, findingLocations, followupText,
 import { segments, withoutHeredocs } from "../hooks/codex-guards/lib/shell.mjs";
 import { R } from "./codex-rollout-rows.mjs";
 
-// Contract 5.4 (revision 18): seam redirects R1-R3.
+// Contract 5.4 (revisions 18-19): seam redirects R1-R3.
 
 const pre = (command, state = {}, extra = {}) => decide({ hook_event_name: "PreToolUse", tool_name: "Bash", cwd: "/r", tool_input: { command }, ...extra }, { pending: [], ...state }, { guards: [] });
 const post = (command, state = {}, response = "") => decide({ hook_event_name: "PostToolUse", tool_name: "Bash", cwd: "/r", tool_input: { command }, tool_response: response }, { pending: [], ...state }, { guards: [] });
@@ -130,6 +130,34 @@ test("R1 fires once per PR per push epoch, again after a push with the review-ro
   assert.ok(context(mixed[1]), "a directory-scoped and a repository-scoped read are different keys (contract 5.4: no stated repository, no match)");
 });
 
+test("epochs are per directory scope: a push in another repository starts no round here (revision 19)", () => {
+  const [first, , reread, , again] = run([
+    ["post", "cd /a && gh pr view 12 --comments"],
+    ["pre", "cd /b && git push origin feature"],
+    ["post", "cd /a && gh pr view 12 --comments"],
+    ["pre", "cd /a && git push origin fix"],
+    ["post", "cd /a && gh pr view 12 --comments"]
+  ]);
+  assert.ok(context(first));
+  assert.equal(context(reread), null, "a push in /b is not a new round for /a's PR");
+  assert.match(context(again), /Review round 2 on PR #12/, "a push in /a is");
+  assert.deepEqual(again.state.seam.epochs, { "/b": 1, "/a": 1 });
+  const quiet = run([["pre", "cd /b && git push origin feature"], ["post", "cd /a && gh pr view 12 --comments"], ["pre", "cd /b && git push origin feature"]]);
+  assert.ok(context(quiet[1]));
+  assert.equal(context(quiet[2]), pushText(2, "`feature`"), "an R1 in /a does not quiet R2 in /b");
+  const repoScoped = run([["post", "gh pr view 12 --repo o/r --comments"], ["post", "cd /x && gh pr view 12 --repo o/r --comments"]]);
+  assert.ok(context(repoScoped[1]), "a stamp records its scope: one key read from two scopes does not share an epoch");
+});
+
+test("ownership comes only from creating forms: a reset of a shared branch makes no later branch stacked (revision 19)", () => {
+  for (const reset of ["git checkout -B develop origin/develop", "git switch -C develop", "git switch --force-create develop", "git worktree add -B develop ../wt"]) {
+    const [, fix, stack] = run([["pre", reset], ["pre", "git checkout -b fix develop"], ["pre", "gh pr create --base develop --title 'Step'"]]);
+    assert.equal(context(fix), null, reset);
+    assert.equal(context(stack), null, reset);
+    assert.deepEqual(stack.state.seam.own, ["/r|fix"], reset);
+  }
+});
+
 test("R1 fills concrete trace commands from REST and GraphQL review output, else the generic form", () => {
   const rest = JSON.stringify([{ id: 1, path: "src/a.py", user: { login: "bot" }, body: "x {y}", line: 12 }, { id: 2, path: "src/b.py", line: null, original_line: 40 }]);
   assert.deepEqual(findingLocations(rest), [{ path: "src/a.py", line: 12 }, { path: "src/b.py", line: 40 }]);
@@ -171,6 +199,9 @@ test("review-derived paths are quoted or dropped: the malicious-path fixture", (
 test("own branches come from named pushes, PR heads, and branch-creating commands; HEAD pushes and main never count", () => {
   assert.deepEqual(createdBranches("git checkout -b feat-a && git switch -c feat-b dev; git -C /r worktree add -b feat-c ../wt main"), [{ name: "feat-a", dir: null, start: null }, { name: "feat-b", dir: null, start: "dev" }, { name: "feat-c", dir: "/r", start: "main" }]);
   assert.deepEqual(createdBranches("git checkout main && git switch dev && git worktree add ../wt existing"), []);
+  assert.deepEqual(createdBranches("git switch --create feat-d dev"), [{ name: "feat-d", dir: null, start: "dev" }]);
+  // Reset forms can reset an existing branch, so they prove nothing (revision 19).
+  assert.deepEqual(createdBranches("git checkout -B develop origin/develop; git switch -C develop; git switch --force-create develop; git worktree add -B develop ../wt"), []);
   const stackedOn = (setup) => context(run([...setup.map((command) => ["pre", command]), ["pre", "gh pr create --base feat-a --title 'Step 2'"]]).at(-1));
   assert.equal(stackedOn(["git push origin feat-a"]), null, "a named push alone is not ownership");
   assert.equal(stackedOn(["git push origin develop", "git push origin feat-a"]), null);
@@ -191,7 +222,7 @@ test("R2 fires on a re-push when no redirect fired in the epoch, with the round-
   assert.match(context(p3), /^\[seam-redirect\] Push 3 to `fix`: 2 fix rounds on one change\./);
   assert.deepEqual(kinds(p3), ["push"]);
   assert.equal(context(other), null, "a first push to a different subject");
-  assert.equal(p3.state.seam.epoch, 3);
+  assert.deepEqual(p3.state.seam.epochs, { "/r": 3 }, "epochs are per directory scope");
 });
 
 test("R2 near misses: text that mentions a push, and a re-push in an epoch where R1 already fired", () => {
@@ -249,7 +280,7 @@ test("output shapes: PostToolUse and PreToolUse additionalContext (probe Q4, Q10
 
 test("dispatcher: a denied call counts no push; another guard's context and a seam redirect are joined and both logged", () => {
   const deny = { code: "x", check: () => ({ action: "deny", reason: "[x] no", pending: { code: "x" } }) };
-  const seeded = { ...emptySeam(), pushes: { "?|a": 1 }, own: ["?|a"], epoch: 1 };
+  const seeded = { ...emptySeam(), pushes: { "?|a": 1 }, own: ["?|a"], epochs: { "?": 1 } };
   const denied = decide({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "git push origin a" } }, { pending: [], seam: seeded }, { guards: [deny] });
   assert.equal(denied.output.hookSpecificOutput.permissionDecision, "deny");
   assert.equal(denied.state.seam.pushes["?|a"], 1, "the refused push is not counted");
@@ -296,7 +327,7 @@ test("nothing for fix loops runs at Stop: 5, 10, and 20 pushes give no round-gua
 });
 
 test("seamBefore and seamAfter are pure: the input state is not mutated", () => {
-  const seam = { ...emptySeam(), pushes: { "?|a": 1 }, own: ["?|a"], epoch: 1 };
+  const seam = { ...emptySeam(), pushes: { "?|a": 1 }, own: ["?|a"], epochs: { "?": 1 } };
   const frozen = JSON.stringify(seam);
   seamBefore({ command: "git push origin a", seam });
   seamAfter({ command: "gh pr view 1 --comments", response: "", seam });

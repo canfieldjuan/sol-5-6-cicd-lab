@@ -53,7 +53,10 @@ export function replaySeam(text) {
     if (!kinds.length) return;
     const textOut = result.output.hookSpecificOutput.additionalContext;
     const headlines = textOut.split("\n").filter((line) => line.startsWith("[seam-redirect]") || line.startsWith("Review round"));
-    timeline.push({ type: "redirect", at, kinds, epoch: state.seam?.epoch ?? 0, headlines });
+    // Epochs are per directory scope (revision 19); the replay reports the
+    // session-wide push count once the redirecting call is counted.
+    const afterPushes = Object.values(state.seam?.epochs ?? {}).reduce((sum, n) => sum + n, 0);
+    timeline.push({ type: "redirect", at, kinds, afterPushes, headlines });
   };
   for (const { at, item } of executions(text)) {
     commands += 1;
@@ -98,8 +101,8 @@ function summarize(file, replayed) {
   const redirects = replayed.timeline.filter((event) => event.type === "redirect");
   const pushes = replayed.timeline.filter((event) => event.type === "push");
   const byKind = (kind) => redirects.filter((event) => event.kinds.includes(kind)).length;
-  const epochs = new Set(redirects.map((event) => event.epoch)).size;
-  return { file, commands: replayed.commands, pushes: pushes.length, redirects: redirects.length, review: byKind("review"), push: byKind("push"), followup: byKind("followup"), epochsWithRedirect: epochs, checkpoints: replayed.checkpoints, redirectsDetail: redirects };
+  const gaps = new Set(redirects.map((event) => event.afterPushes)).size;
+  return { file, commands: replayed.commands, pushes: pushes.length, redirects: redirects.length, review: byKind("review"), push: byKind("push"), followup: byKind("followup"), pushGapsWithRedirect: gaps, checkpoints: replayed.checkpoints, redirectsDetail: redirects };
 }
 
 export function main(argv = process.argv.slice(2)) {
@@ -122,8 +125,8 @@ export function main(argv = process.argv.slice(2)) {
   const reports = files.map((file) => summarize(file, replaySeam(readFileSync(file, "utf8"))));
   if (argv.includes("--json")) { process.stdout.write(JSON.stringify(reports, null, 2) + "\n"); return 0; }
   for (const report of reports) {
-    console.log(`${path.basename(report.file)}: commands ${report.commands}, pushes ${report.pushes}, redirects ${report.redirects} (review ${report.review}, push ${report.push}, followup ${report.followup}) in ${report.epochsWithRedirect} epochs`);
-    for (const event of report.redirectsDetail) console.log(`  ${event.at}  ${event.kinds.join("+").padEnd(8)} epoch ${event.epoch}  ${event.headlines.map((line) => line.slice(0, 110)).join(" / ")}`);
+    console.log(`${path.basename(report.file)}: commands ${report.commands}, pushes ${report.pushes}, redirects ${report.redirects} (review ${report.review}, push ${report.push}, followup ${report.followup}) in ${report.pushGapsWithRedirect} push gaps`);
+    for (const event of report.redirectsDetail) console.log(`  ${event.at}  ${event.kinds.join("+").padEnd(8)} push count ${event.afterPushes}  ${event.headlines.map((line) => line.slice(0, 110)).join(" / ")}`);
     for (const point of report.checkpoints) {
       const first = point.firstRedirect ? `first redirect ${point.firstRedirect.at} (${point.firstRedirect.kinds.join("+")}), ${point.firstRedirect.pushesEarlier} pushes earlier` : "no redirect before it";
       console.log(`  checkpoint (push ${TIER}) on ${point.subject} at ${point.checkpointAt}: ${first}`);

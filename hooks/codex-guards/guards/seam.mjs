@@ -10,8 +10,10 @@ import { directoryOf, pushesIn } from "../stop/round-guard.mjs";
 // hook input and the session state (SR4).
 //
 // R1 review read (PostToolUse), R2 re-push of an own branch (PreToolUse), R3
-// a branch or PR stacked on own work (PreToolUse). At most one redirect per key per push
-// epoch (SR3); R2 also stays quiet when any redirect already fired in the epoch.
+// a branch or PR stacked on own work (PreToolUse). At most one redirect per key
+// per push epoch (SR3); R2 also stays quiet when any redirect already fired in
+// the epoch. Epochs are per directory scope (revision 19), so a push in one
+// repository does not start a new round for another.
 
 export const CODE = "seam-redirect";
 
@@ -32,11 +34,12 @@ const DEFAULT_BRANCHES = new Set(["main", "master"]);
 // directory, PR keys the stated repository, else the directory. The hook
 // cannot see `workdir` (probe Q7), so a repo switch made only through it
 // still shares a directory key.
-const branchKey = (dir, name) => `${dir ?? "?"}|${name}`;
+const scopeOf = (dir) => dir ?? "?";
+const branchKey = (dir, name) => `${scopeOf(dir)}|${name}`;
 const repoScope = (owner, name) => `${owner}/${name}`.toLowerCase();
 
 export function emptySeam() {
-  return { epoch: 0, pushes: {}, own: [], rounds: {}, stamps: {}, lastEpoch: -1 };
+  return { epochs: {}, pushes: {}, own: [], rounds: {}, stamps: {}, lastFired: {} };
 }
 
 function commandWords(command) {
@@ -161,7 +164,9 @@ export function createdBranches(command) {
     let dir = null;
     while (i < words.length && words[i] === "-C") { dir = words[i + 1] ?? null; i += 2; }
     const [verb, ...rest] = words.slice(i);
-    const flags = verb === "checkout" ? ["-b", "-B"] : verb === "switch" ? ["-c", "-C", "--create", "--force-create"] : verb === "worktree" && rest[0] === "add" ? ["-b", "-B"] : null;
+    // Only the forms git refuses on an existing branch prove creation; -B, -C,
+    // and --force-create also reset one (`git checkout -B develop origin/develop`).
+    const flags = verb === "checkout" ? ["-b"] : verb === "switch" ? ["-c", "--create"] : verb === "worktree" && rest[0] === "add" ? ["-b"] : null;
     if (!flags) continue;
     const at = rest.findIndex((word) => flags.includes(word));
     const name = at >= 0 ? rest[at + 1] : undefined;
@@ -270,7 +275,14 @@ export function followupText(base) {
   ].join("\n");
 }
 
-const clone = (seam) => ({ ...emptySeam(), ...(seam ?? {}), pushes: { ...(seam?.pushes ?? {}) }, own: [...(seam?.own ?? [])], rounds: { ...(seam?.rounds ?? {}) }, stamps: { ...(seam?.stamps ?? {}) } });
+const clone = (seam) => ({ ...emptySeam(), ...(seam ?? {}), epochs: { ...(seam?.epochs ?? {}) }, pushes: { ...(seam?.pushes ?? {}) }, own: [...(seam?.own ?? [])], rounds: { ...(seam?.rounds ?? {}) }, stamps: { ...(seam?.stamps ?? {}) }, lastFired: { ...(seam?.lastFired ?? {}) } });
+
+// The current epoch of a directory scope, and the stamp value for it: a stamp
+// records its scope, so one key read from two scopes never shares an epoch.
+const epochOf = (seam, dir) => seam.epochs[scopeOf(dir)] ?? 0;
+const markOf = (seam, dir) => `${scopeOf(dir)}@${epochOf(seam, dir)}`;
+const firedIn = (seam, dir) => seam.lastFired[scopeOf(dir)] === epochOf(seam, dir);
+const stampFired = (seam, dir, stamp) => { seam.stamps[stamp] = markOf(seam, dir); seam.lastFired[scopeOf(dir)] = epochOf(seam, dir); };
 
 // PreToolUse: R2 and R3, and the push epoch. With emit false (the call was
 // rewritten by another guard), counters move but nothing fires or is stamped.
@@ -285,23 +297,21 @@ export function seamBefore({ command, cwd = null, seam, emit = true }) {
     const subject = push.named ? branchKey(push.dir, push.key) : push.key;
     const round = (next.pushes[subject] ?? 0) + 1;
     const stamp = `push:${subject}`;
-    if (emit && round >= 2 && next.lastEpoch !== next.epoch && next.stamps[stamp] !== next.epoch) {
+    if (emit && round >= 2 && !firedIn(next, push.dir) && next.stamps[stamp] !== markOf(next, push.dir)) {
       fired.push({ kind: "push", reason: pushText(round, push.label) });
-      next.stamps[stamp] = next.epoch;
-      next.lastEpoch = next.epoch;
+      stampFired(next, push.dir, stamp);
     }
     next.pushes[subject] = round;
     // A push alone is not ownership (contract 5.4): shared branches get pushed too.
-    next.epoch += 1;
+    next.epochs[scopeOf(push.dir)] = epochOf(next, push.dir) + 1;
   }
   for (const created of createdBranches(command)) {
     const where = created.dir ? (path.isAbsolute(created.dir) || !dir ? created.dir : path.join(dir, created.dir)) : dir;
     // R3, earliest: a new branch started from own unmerged work.
     const stamp = `followup:${branchKey(where, created.name)}`;
-    if (emit && created.start && !DEFAULT_BRANCHES.has(created.start) && next.own.includes(branchKey(where, created.start)) && next.stamps[stamp] !== next.epoch) {
+    if (emit && created.start && !DEFAULT_BRANCHES.has(created.start) && next.own.includes(branchKey(where, created.start)) && next.stamps[stamp] !== markOf(next, where)) {
       fired.push({ kind: "followup", reason: branchText(created.name, created.start) });
-      next.stamps[stamp] = next.epoch;
-      next.lastEpoch = next.epoch;
+      stampFired(next, where, stamp);
     }
     own(where, created.name);
   }
@@ -309,10 +319,9 @@ export function seamBefore({ command, cwd = null, seam, emit = true }) {
   if (create) {
     const stacked = Boolean(create.base) && !DEFAULT_BRANCHES.has(create.base) && next.own.includes(branchKey(dir, create.base));
     const key = `followup:${branchKey(dir, create.base)}`;
-    if (emit && stacked && next.stamps[key] !== next.epoch) {
+    if (emit && stacked && next.stamps[key] !== markOf(next, dir)) {
       fired.push({ kind: "followup", reason: followupText(create.base) });
-      next.stamps[key] = next.epoch;
-      next.lastEpoch = next.epoch;
+      stampFired(next, dir, key);
     }
     // The head of a PR this session opened is its own work from now on.
     own(dir, create.head);
@@ -325,17 +334,18 @@ export function seamAfter({ command, response, cwd = null, seam }) {
   const next = clone(seam);
   const fired = [];
   const reads = reviewReads(command, cwd);
+  // A read is measured against the pushes of the scope it runs in.
+  const dir = directoryOf(withoutHeredocs(String(command)), cwd);
   // No review text arrived: no redirect, and no stamp consumed.
-  const fresh = reads.length && hasReviewText(response) ? reads.filter((ref) => next.stamps[`review:${ref.key}`] !== next.epoch) : [];
+  const fresh = reads.length && hasReviewText(response) ? reads.filter((ref) => next.stamps[`review:${ref.key}`] !== markOf(next, dir)) : [];
   if (fresh.length) {
     let round = 0;
     let roundLabel = fresh[0].label;
     for (const ref of fresh) {
       next.rounds[ref.key] = (next.rounds[ref.key] ?? 0) + 1;
-      next.stamps[`review:${ref.key}`] = next.epoch;
+      stampFired(next, dir, `review:${ref.key}`);
       if (next.rounds[ref.key] > round) { round = next.rounds[ref.key]; roundLabel = ref.label; }
     }
-    next.lastEpoch = next.epoch;
     fired.push({ kind: "review", reason: reviewText(fresh.map((ref) => ref.label), round, roundLabel, findingLocations(response)) });
   }
   return { fired, seam: next };
