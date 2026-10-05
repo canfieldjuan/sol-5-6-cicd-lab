@@ -36,6 +36,23 @@ test("replay: the incident's shape gets a redirect before push 2 and an escalate
   assert.deepEqual(replayed.checkpoints, [{ subject: "step-2", checkpointAt: "T10", firstRedirect: { at: "T04", kinds: ["review"], pushesEarlier: 4 } }]);
 });
 
+test("replay: a checkpoint counts only redirects from its own directory scope", () => {
+  const rows = [
+    ran("T01", "cd /a && git push origin fix"),
+    ran("T02", "cd /b && gh pr view 7 --comments", "reviewer: other repository"),
+    ran("T03", "cd /a && git push origin fix"),
+    ran("T04", "cd /a && git push origin fix"),
+    ran("T05", "cd /a && git push origin fix"),
+    ran("T06", "cd /a && git push origin fix")
+  ].join("\n");
+  const replayed = replaySeam(rows);
+  assert.deepEqual(at(replayed, "T02").map((event) => event.scopes), [["/b"]], "the decoy review redirect is /b's");
+  const [checkpoint] = replayed.checkpoints;
+  assert.equal(checkpoint.checkpointAt, "T06");
+  assert.equal(checkpoint.firstRedirect.at, "T03", "/b's review redirect does not cover /a's checkpoint");
+  assert.deepEqual(checkpoint.firstRedirect.kinds, ["push"]);
+});
+
 // The real rollout behind section 5.4 is private and stays local. Point
 // SEAM_INCIDENT_ROLLOUT at it to run this check.
 test("replay: the reproduction rollout meets the 5.4 timeline", (t) => {

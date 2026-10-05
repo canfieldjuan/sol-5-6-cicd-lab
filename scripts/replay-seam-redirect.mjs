@@ -5,8 +5,8 @@
 // row's output, from a fresh state. Only the seam path runs (no other guard
 // touches the filesystem here). Prints every redirect with its row timestamp,
 // and, for each subject that reached 5 pushes (where the retired Stop
-// checkpoint fired), the first redirect in that span and how many pushes
-// earlier it came. Reads local rollouts only; nothing leaves the machine.
+// checkpoint fired), the first redirect in that span from the same directory
+// scope and how many pushes earlier it came. Reads local rollouts only; nothing leaves the machine.
 //
 // One difference from a live session: hooks see the session cwd, not the
 // command's workdir (probe Q7), while the replay passes the row's real cwd.
@@ -20,7 +20,8 @@ import path from "node:path";
 import { decide } from "../hooks/codex-guards/guard.mjs";
 import { CODE } from "../hooks/codex-guards/guards/seam.mjs";
 import { executedCommand } from "../hooks/codex-guards/lib/rollout.mjs";
-import { pushesIn } from "../hooks/codex-guards/stop/round-guard.mjs";
+import { withoutHeredocs } from "../hooks/codex-guards/lib/shell.mjs";
+import { directoryOf, pushesIn } from "../hooks/codex-guards/stop/round-guard.mjs";
 import { fail, isMain } from "./lib.mjs";
 import { isNative, rolloutFiles } from "./replay-stop-gates.mjs";
 
@@ -48,7 +49,7 @@ export function replaySeam(text) {
   const timeline = [];
   const counts = {};
   let commands = 0;
-  const record = (result, at) => {
+  const record = (result, at, scopes) => {
     const kinds = (result.log ?? []).filter((entry) => entry.code === CODE).map((entry) => entry.kind);
     if (!kinds.length) return;
     const textOut = result.output.hookSpecificOutput.additionalContext;
@@ -56,28 +57,33 @@ export function replaySeam(text) {
     // Epochs are per directory scope (revision 19); the replay reports the
     // session-wide push count once the redirecting call is counted.
     const afterPushes = Object.values(state.seam?.epochs ?? {}).reduce((sum, n) => sum + n, 0);
-    timeline.push({ type: "redirect", at, kinds, afterPushes, headlines });
+    timeline.push({ type: "redirect", at, kinds, afterPushes, scopes, headlines });
   };
   for (const { at, item } of executions(text)) {
     commands += 1;
     const { cmd, workdir } = executedCommand(item);
     const base = { tool_name: "Bash", cwd: workdir, tool_input: { command: cmd } };
+    const pushes = pushesIn({ cmd, workdir });
+    // The directory scopes this command acts in (revision 19): its own, and
+    // each push's. A checkpoint only counts redirects from its subject's scope.
+    const scopes = [...new Set([directoryOf(withoutHeredocs(String(cmd)), workdir), ...pushes.map((push) => push.dir)].map((dir) => dir ?? "?"))];
     const before = decide({ hook_event_name: "PreToolUse", ...base }, state, { guards: [] });
     state = before.state;
-    record(before, at);
-    for (const push of pushesIn({ cmd, workdir })) {
+    record(before, at, scopes);
+    for (const push of pushes) {
       counts[push.key] = (counts[push.key] ?? 0) + 1;
-      timeline.push({ type: "push", at, subject: push.key, round: counts[push.key] });
+      timeline.push({ type: "push", at, subject: push.key, dir: push.dir ?? "?", round: counts[push.key] });
     }
     const after = decide({ hook_event_name: "PostToolUse", ...base, tool_response: item.aggregated_output ?? "" }, state, { guards: [] });
     state = after.state;
-    record(after, at);
+    record(after, at, scopes);
   }
   return { commands, timeline, checkpoints: checkpoints(timeline) };
 }
 
 // For each subject's 5th push (the retired Stop checkpoint), the first
-// redirect between that subject's first and 5th push.
+// redirect between that subject's first and 5th push from the 5th push's
+// directory scope. A redirect from another repository does not count.
 function checkpoints(timeline) {
   const result = [];
   const firstPush = {};
@@ -90,7 +96,7 @@ function checkpoints(timeline) {
     let first = null;
     for (const earlier of timeline.slice(firstPush[event.subject], index)) {
       if (earlier.type === "push" && earlier.subject === event.subject) seen[event.subject] = earlier.round;
-      if (earlier.type === "redirect" && !first) first = { at: earlier.at, kinds: earlier.kinds, pushesEarlier: TIER - seen[event.subject] };
+      if (earlier.type === "redirect" && earlier.scopes.includes(event.dir) && !first) first = { at: earlier.at, kinds: earlier.kinds, pushesEarlier: TIER - seen[event.subject] };
     }
     result.push({ subject: event.subject, checkpointAt: event.at, firstRedirect: first });
   });

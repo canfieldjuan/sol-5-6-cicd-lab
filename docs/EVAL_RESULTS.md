@@ -267,7 +267,9 @@ that have not:
 | Revision 19 | 130 (88 / 41 / 1) |
 
 Over all 20 sessions, the old checkpoint's 13 firings each still have a
-redirect 4 pushes earlier. The redirects revision 19 removes were
+redirect 4 pushes earlier, counting only redirects from the checkpoint's own
+directory scope (the replay no longer lets another repository's redirect
+cover a checkpoint). The redirects revision 19 removes were
 escalations driven by pushes in other worktrees. One example is review
 rounds 16-19 on a PR reread from one directory while every push went to a
 different one. Of 254 matching reads, 28 ran from a directory that never
