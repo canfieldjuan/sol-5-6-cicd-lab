@@ -9,23 +9,40 @@ import { fail, isMain, rootDir } from "./lib.mjs";
 // Dry run unless --apply. Existing hooks.json entries are never modified or
 // reordered: Codex keys hook trust by position (<file>:<event>:<i>:<j>), so the
 // guard entries are only appended.
+//
+// --claude (contract 5.4, revision 20) installs the same tree for Claude Code
+// and registers only the seam redirect's entry point, on Bash, in
+// settings.json. The Codex install never touches Claude Code (H6).
 
 export const HOOK_EVENTS = [
   { event: "PreToolUse", matcher: "*", statusMessage: "Checking lab guards" },
   { event: "PostToolUse", matcher: "*", statusMessage: "Checking for failed reads" },
   { event: "Stop", matcher: null, statusMessage: "Checking pending guard redirects" }
 ];
-const MARK = "/lab-guards/guard.mjs";
+export const CLAUDE_EVENTS = [
+  { event: "PreToolUse", matcher: "Bash" },
+  { event: "PostToolUse", matcher: "Bash" }
+];
+export const TARGETS = {
+  codex: { events: HOOK_EVENTS, entry: "guard.mjs", manifest: "guards-install.json", heartbeat: ["guards", "heartbeat.json"] },
+  claude: { events: CLAUDE_EVENTS, entry: "claude-seam.mjs", manifest: "claude-seam-install.json", heartbeat: ["claude-seam", "heartbeat.json"] }
+};
 
-export function defaultPaths(env = process.env) {
+export function defaultPaths(env = process.env, target = "codex") {
   const home = os.homedir();
-  const codexHome = env.CODEX_HOME || path.join(home, ".codex");
   const stateHome = env.XDG_STATE_HOME || path.join(home, ".local", "state");
+  const source = path.join(rootDir, "hooks", "codex-guards");
+  const stateDir = path.join(stateHome, "sol-lab");
+  if (target === "claude") {
+    const claudeHome = env.CLAUDE_CONFIG_DIR || path.join(home, ".claude");
+    return { source, installDir: path.join(claudeHome, "hooks", "lab-guards"), hooksJson: path.join(claudeHome, "settings.json"), stateDir, binDir: null };
+  }
+  const codexHome = env.CODEX_HOME || path.join(home, ".codex");
   return {
-    source: path.join(rootDir, "hooks", "codex-guards"),
+    source,
     installDir: path.join(codexHome, "hooks", "lab-guards"),
     hooksJson: path.join(codexHome, "hooks.json"),
-    stateDir: path.join(stateHome, "sol-lab"),
+    stateDir,
     binDir: path.join(home, ".local", "bin")
   };
 }
@@ -46,15 +63,16 @@ async function readOptional(file) {
   try { return await readFile(file); } catch (error) { if (error.code === "ENOENT") return null; throw error; }
 }
 
-// Returns the merged hooks.json object: every existing entry untouched and in
-// place, guard entries appended where missing.
-export function mergeHooks(existing, guardCommand) {
+// Returns the merged hooks object: every existing entry and every other key
+// untouched and in place, guard entries appended where missing. An entry is
+// recognized by its install-dir-relative script path.
+export function mergeHooks(existing, guardCommand, events = HOOK_EVENTS, mark = "/lab-guards/guard.mjs") {
   const config = structuredClone(existing ?? {});
   config.hooks ??= {};
-  for (const { event, matcher, statusMessage } of HOOK_EVENTS) {
+  for (const { event, matcher, statusMessage } of events) {
     const list = (config.hooks[event] ??= []);
-    const present = list.some((group) => (group.hooks ?? []).some((hook) => String(hook.command).includes(MARK)));
-    if (!present) list.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: guardCommand, timeout: 10, statusMessage }] });
+    const present = list.some((group) => (group.hooks ?? []).some((hook) => String(hook.command).includes(mark)));
+    if (!present) list.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: guardCommand, timeout: 10, ...(statusMessage ? { statusMessage } : {}) }] });
   }
   return config;
 }
@@ -96,16 +114,17 @@ export function captureGhFields(run = (args) => spawnSync("gh", args, { encoding
 
 export const wrapperFor = (installDir) => `#!/bin/sh\n# Installed by sol-5-6-cicd-lab scripts/install-codex-guards.mjs\nexec node '${path.join(installDir, "bin", "codex-pr-status.mjs")}' "$@"\n`;
 
-export async function install({ source, installDir, hooksJson, stateDir, binDir = null, apply = false, now = new Date(), config = null }) {
+export async function install({ source, installDir, hooksJson, stateDir, binDir = null, apply = false, now = new Date(), config = null, target = "codex" }) {
+  const { events, entry, manifest: manifestName } = TARGETS[target];
   await mkdir(stateDir, { recursive: true });
-  const lockPath = path.join(stateDir, "guards-install.lock");
+  const lockPath = path.join(stateDir, manifestName.replace(/\.json$/, ".lock"));
   let lock;
   try { lock = await open(lockPath, "wx"); } catch (error) {
     if (error.code === "EEXIST") throw new Error(`another install holds ${lockPath}`);
     throw error;
   }
   try {
-    const statePath = path.join(stateDir, "guards-install.json");
+    const statePath = path.join(stateDir, manifestName);
     const state = JSON.parse((await readOptional(statePath))?.toString("utf8") ?? "{}");
     const files = await listFiles(source);
     // Refuse to overwrite installed files that were edited by hand since the last install.
@@ -132,8 +151,8 @@ export async function install({ source, installDir, hooksJson, stateDir, binDir 
     if (rawHooks !== null) {
       try { existing = JSON.parse(rawHooks.toString("utf8")); } catch { throw new Error(`${hooksJson} is not valid JSON; not touching it`); }
     }
-    const guardCommand = `node '${path.join(installDir, "guard.mjs")}'`;
-    const merged = mergeHooks(existing, guardCommand);
+    const guardCommand = `node '${path.join(installDir, entry)}'`;
+    const merged = mergeHooks(existing, guardCommand, events, `/${path.basename(installDir)}/${entry}`);
     const hooksChanged = JSON.stringify(merged) !== JSON.stringify(existing);
     const plan = { files, hooksChanged, guardCommand };
     if (!apply) return { ...plan, applied: false };
@@ -149,7 +168,7 @@ export async function install({ source, installDir, hooksJson, stateDir, binDir 
     let backup = null;
     if (hooksChanged) {
       if (rawHooks !== null) {
-        backup = path.join(stateDir, "backups", `hooks.json.${stamp}.bak`);
+        backup = path.join(stateDir, "backups", `${path.basename(hooksJson)}.${stamp}.bak`);
         await mkdir(path.dirname(backup), { recursive: true });
         await copyFile(hooksJson, backup);
       }
@@ -166,7 +185,7 @@ export async function install({ source, installDir, hooksJson, stateDir, binDir 
       await chmod(wrapperPath, 0o755);
       wrapperState = { path: wrapperPath, sha: sha(Buffer.from(wrapper)) };
     }
-    const nextState = { files: manifest, installedAt: now.toISOString(), guardCommand, wrapper: wrapperState };
+    const nextState = { target, files: manifest, installedAt: now.toISOString(), guardCommand, wrapper: wrapperState };
     await writeAtomic(statePath, JSON.stringify(nextState, null, 2) + "\n", stateDir);
     return { ...plan, applied: true, backup };
   } finally {
@@ -175,8 +194,19 @@ export async function install({ source, installDir, hooksJson, stateDir, binDir 
   }
 }
 
+async function mainClaude(apply) {
+  const paths = defaultPaths(process.env, "claude");
+  const result = await install({ ...paths, apply, target: "claude" });
+  console.log(`${apply ? "installed" : "dry run"}: ${result.files.length} guard files -> ${paths.installDir}`);
+  console.log(`settings.json ${result.hooksChanged ? (apply ? "updated (seam entries appended)" : "would gain the seam entries") : "already has the seam entries"}: ${paths.hooksJson}`);
+  if (result.backup) console.log(`backup: ${result.backup}`);
+  if (!apply) return console.log("pass --apply to install");
+  console.log("\nStart a new Claude Code session, run any Bash command, then `npm run guards:status -- --claude` must report: active.");
+}
+
 async function main() {
   const apply = process.argv.includes("--apply");
+  if (process.argv.includes("--claude")) return mainClaude(apply);
   const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; };
   const config = guardConfig({ repos: (arg("--repos") ?? "").split(",").filter(Boolean), db: arg("--db") ?? null });
   const ghFields = captureGhFields();

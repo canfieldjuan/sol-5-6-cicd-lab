@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fail, isMain } from "./lib.mjs";
-import { defaultPaths } from "./install-codex-guards.mjs";
+import { TARGETS, defaultPaths } from "./install-codex-guards.mjs";
 
 // Activation check for the Codex guards (contract H7). Codex silently skips
 // untrusted hooks, so "installed" is not "active": the guards are active only
@@ -11,8 +11,9 @@ import { defaultPaths } from "./install-codex-guards.mjs";
 const sha = (buffer) => createHash("sha256").update(buffer).digest("hex");
 async function json(file) { try { return JSON.parse(await readFile(file, "utf8")); } catch { return null; } }
 
-export async function status({ installDir, hooksJson, stateDir }) {
-  const state = await json(path.join(stateDir, "guards-install.json"));
+export async function status({ installDir, hooksJson, stateDir, target = "codex" }) {
+  const { events, manifest, heartbeat: heartbeatPath } = TARGETS[target];
+  const state = await json(path.join(stateDir, manifest));
   if (!state) return { status: "not installed", detail: "no install record" };
   for (const [rel, hash] of Object.entries(state.files ?? {})) {
     let content;
@@ -25,17 +26,19 @@ export async function status({ installDir, hooksJson, stateDir }) {
     if (sha(content) !== state.wrapper.sha) return { status: "broken", detail: `${state.wrapper.path} differs from the installed version` };
   }
   const hooks = await json(hooksJson);
-  const registered = ["PreToolUse", "PostToolUse", "Stop"].every((event) => (hooks?.hooks?.[event] ?? []).some((group) => (group.hooks ?? []).some((hook) => hook.command === state.guardCommand)));
+  const registered = events.map(({ event }) => event).every((event) => (hooks?.hooks?.[event] ?? []).some((group) => (group.hooks ?? []).some((hook) => hook.command === state.guardCommand)));
   if (!registered) return { status: "broken", detail: `${hooksJson} lacks the guard entries` };
-  const heartbeat = await json(path.join(stateDir, "guards", "heartbeat.json"));
+  const heartbeat = await json(path.join(stateDir, ...heartbeatPath));
   if (!heartbeat || !(heartbeat.at > state.installedAt)) {
-    return { status: "installed, not active", detail: "no guard run since install: trust the lab-guards hooks in the Codex TUI (/hooks), then run any command" };
+    const next = target === "claude" ? "start a new Claude Code session and run any Bash command" : "trust the lab-guards hooks in the Codex TUI (/hooks), then run any command";
+    return { status: "installed, not active", detail: `no guard run since install: ${next}` };
   }
   return { status: "active", detail: `last run ${heartbeat.at} (${heartbeat.event}, session ${heartbeat.session})` };
 }
 
 async function main() {
-  const result = await status(defaultPaths());
+  const target = process.argv.includes("--claude") ? "claude" : "codex";
+  const result = await status({ ...defaultPaths(process.env, target), target });
   console.log(`${result.status}: ${result.detail}`);
   if (result.status !== "active") fail("guards are not active");
 }

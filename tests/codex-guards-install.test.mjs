@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { rootDir } from "../scripts/lib.mjs";
-import { install, mergeHooks } from "../scripts/install-codex-guards.mjs";
+import { CLAUDE_EVENTS, install, mergeHooks } from "../scripts/install-codex-guards.mjs";
 import { status } from "../scripts/guards-status.mjs";
 
 const EXISTING = {
@@ -128,5 +128,78 @@ test("codex-pr-status wrapper: installed executable on PATH dir, points at the i
     await writeFile(path.join(paths.binDir, "codex-pr-status"), "#!/bin/sh\necho someone else\n");
     await assert.rejects(install({ ...paths, apply: true }), /was not written by this script/);
     assert.equal((await status(paths)).status, "broken");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// Contract 5.4, revision 20: the --claude target.
+const CLAUDE_SETTINGS = {
+  permissions: { allow: ["Bash(git status)"] },
+  hooks: {
+    PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "bash \"$HOME/.claude/hooks/git-guard.sh\"", timeout: 15 }] }],
+    Stop: [{ hooks: [{ type: "command", command: "bash \"$HOME/.claude/hooks/evidence-gate.sh\"", timeout: 30 }] }]
+  },
+  model: "opus"
+};
+
+async function claudeFixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "claude-install-"));
+  const paths = {
+    source: path.join(rootDir, "hooks", "codex-guards"),
+    installDir: path.join(root, "claude", "hooks", "lab-guards"),
+    hooksJson: path.join(root, "claude", "settings.json"),
+    stateDir: path.join(root, "state", "sol-lab"),
+    binDir: null,
+    target: "claude"
+  };
+  await mkdir(path.join(root, "claude"), { recursive: true });
+  await writeFile(paths.hooksJson, JSON.stringify(CLAUDE_SETTINGS, null, 2) + "\n");
+  return { root, paths };
+}
+
+test("claude target: appends exactly the two Bash seam entries, keeps every other key and entry, backs up, and is idempotent", async () => {
+  const { root, paths } = await claudeFixture();
+  try {
+    const dry = await install(paths);
+    assert.equal(dry.applied, false);
+    assert.equal(dry.hooksChanged, true);
+    const first = await install({ ...paths, apply: true });
+    assert.equal(path.basename(first.backup).split(".").slice(0, 2).join("."), "settings.json");
+    assert.deepEqual(JSON.parse(await readFile(first.backup, "utf8")), CLAUDE_SETTINGS);
+    const settings = JSON.parse(await readFile(paths.hooksJson, "utf8"));
+    assert.deepEqual(Object.keys(settings), Object.keys(CLAUDE_SETTINGS), "key order kept");
+    assert.deepEqual(settings.permissions, CLAUDE_SETTINGS.permissions);
+    assert.equal(settings.model, "opus");
+    assert.deepEqual(settings.hooks.PreToolUse[0], CLAUDE_SETTINGS.hooks.PreToolUse[0]);
+    assert.deepEqual(settings.hooks.Stop, CLAUDE_SETTINGS.hooks.Stop, "no Stop entry for Claude");
+    const command = `node '${path.join(paths.installDir, "claude-seam.mjs")}'`;
+    for (const { event } of CLAUDE_EVENTS) {
+      const added = settings.hooks[event].at(-1);
+      assert.deepEqual(added, { matcher: "Bash", hooks: [{ type: "command", command, timeout: 10 }] }, event);
+    }
+    assert.equal(settings.hooks.PreToolUse.length, 2);
+    assert.equal(settings.hooks.PostToolUse.length, 1);
+    assert.ok((await readdir(paths.installDir)).includes("claude-seam.mjs"));
+    assert.ok((await readdir(paths.stateDir)).includes("claude-seam-install.json"));
+    assert.ok(!(await readdir(paths.stateDir)).includes("guards-install.json"), "the Codex manifest is separate");
+    const second = await install({ ...paths, apply: true });
+    assert.equal(second.hooksChanged, false);
+    assert.equal(second.backup, null);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("claude status: installed-not-active until a Claude heartbeat newer than the install; a Codex heartbeat does not count", async () => {
+  const { root, paths } = await claudeFixture();
+  try {
+    assert.equal((await status(paths)).status, "not installed");
+    await install({ ...paths, apply: true, now: new Date("2026-10-05T10:00:00Z") });
+    const pending = await status(paths);
+    assert.equal(pending.status, "installed, not active");
+    assert.match(pending.detail, /new Claude Code session/);
+    await mkdir(path.join(paths.stateDir, "guards"), { recursive: true });
+    await writeFile(path.join(paths.stateDir, "guards", "heartbeat.json"), JSON.stringify({ at: "2026-10-05T11:00:00.000Z" }));
+    assert.equal((await status(paths)).status, "installed, not active", "the Codex heartbeat is not Claude's");
+    await mkdir(path.join(paths.stateDir, "claude-seam"), { recursive: true });
+    await writeFile(path.join(paths.stateDir, "claude-seam", "heartbeat.json"), JSON.stringify({ at: "2026-10-05T11:00:00.000Z", event: "PreToolUse", session: "s" }));
+    assert.equal((await status(paths)).status, "active");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

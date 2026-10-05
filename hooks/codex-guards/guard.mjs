@@ -28,17 +28,17 @@ export function stateDir(env = process.env) {
   return env.SOL_LAB_GUARD_STATE || path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "sol-lab", "guards");
 }
 
-function readJson(file, fallback) {
+export function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, "utf8")); } catch { return fallback; }
 }
 
-function writeJsonAtomic(file, value) {
+export function writeJsonAtomic(file, value) {
   const temporary = `${file}.tmp-${process.pid}`;
   writeFileSync(temporary, JSON.stringify(value, null, 2) + "\n");
   renameSync(temporary, file);
 }
 
-const sessionFile = (dir, sessionId) => path.join(dir, `session-${String(sessionId || "unknown").replace(/[^\w.-]/g, "_")}.json`);
+export const sessionFile = (dir, sessionId) => path.join(dir, `session-${String(sessionId || "unknown").replace(/[^\w.-]/g, "_")}.json`);
 
 // Pure decision function: returns { output, state } for one hook event.
 // Codex ports of the Stop gates (contract 5.3). Each reads the rollout at
