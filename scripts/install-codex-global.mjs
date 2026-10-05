@@ -1,7 +1,7 @@
 import { copyFile, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fail, isMain, readJson, rootDir } from "./lib.mjs";
+import { fail, isMain, readJson, rootDir, writeReplacement } from "./lib.mjs";
 import { sha256 } from "./check-instructions.mjs";
 
 // Installs the tracked global AGENTS.md, or with --candidate the candidate,
@@ -68,7 +68,8 @@ export async function install({ source, target, stateDir, baselineHash, apply = 
       await copyFile(target, backup);
     }
     const temporary = path.join(stateDir, `AGENTS.md.tmp-${process.pid}`);
-    await writeFile(temporary, sourceBuffer, { mode: 0o644 });
+    // The replacement keeps the target's permission bits (S6, revision 7).
+    await writeReplacement(temporary, sourceBuffer, target, 0o644);
     try {
       const recheck = await readOptional(target);
       if ((recheck === null ? null : sha256(recheck)) !== targetHash) {

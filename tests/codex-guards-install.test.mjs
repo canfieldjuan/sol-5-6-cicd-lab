@@ -203,3 +203,20 @@ test("claude status: installed-not-active until a Claude heartbeat newer than th
     assert.equal((await status(paths)).status, "active");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("both targets keep the replaced config file's permission bits (revision 20)", async () => {
+  const { chmod, stat } = await import("node:fs/promises");
+  const claude = await claudeFixture();
+  try {
+    await chmod(claude.paths.hooksJson, 0o600);
+    const result = await install({ ...claude.paths, apply: true });
+    assert.equal((await stat(claude.paths.hooksJson)).mode & 0o777, 0o600, "a 0600 settings.json stays 0600");
+    assert.equal((await stat(result.backup)).mode & 0o777, 0o600, "and so does its backup");
+  } finally { await rm(claude.root, { recursive: true, force: true }); }
+  const codex = await fixture();
+  try {
+    await chmod(codex.paths.hooksJson, 0o640);
+    await install({ ...codex.paths, apply: true });
+    assert.equal((await stat(codex.paths.hooksJson)).mode & 0o777, 0o640, "hooks.json keeps its mode");
+  } finally { await rm(codex.root, { recursive: true, force: true }); }
+});

@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, copyFile, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fail, isMain, rootDir } from "./lib.mjs";
+import { fail, isMain, rootDir, writeReplacement } from "./lib.mjs";
 
 // Installs the Codex guards (contract 5.2) and registers them in hooks.json.
 // Dry run unless --apply. Existing hooks.json entries are never modified or
@@ -77,9 +77,10 @@ export function mergeHooks(existing, guardCommand, events = HOOK_EVENTS, mark = 
   return config;
 }
 
+// Replaces `file` atomically, keeping its permission bits (revision 20).
 async function writeAtomic(file, content, stateDir) {
   const temporary = path.join(stateDir, `${path.basename(file)}.tmp-${process.pid}`);
-  await writeFile(temporary, content);
+  await writeReplacement(temporary, content, file);
   await rename(temporary, file);
 }
 
