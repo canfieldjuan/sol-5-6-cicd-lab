@@ -260,6 +260,18 @@ test("R2 fires after an R1 or R3 in the same epoch; R1's review-round line owns 
   assert.equal(context(afterR3[2]), pushText(2, "`feat-a`"), "an R3 in this epoch does not quiet R2");
 });
 
+test("emit false (another guard rewrote the call): nothing fires or is stamped, but the push still counts", () => {
+  const seam = { ...emptySeam(), epochs: { "/r": 1 }, pushes: { "/r|fix": 1 }, own: ["/r|feat-a"] };
+  const out = seamBefore({ command: "git push origin fix && git checkout -b fix-a feat-a && gh pr create --base feat-a --head fix-b --title x", cwd: "/r", seam, emit: false });
+  assert.deepEqual(out.fired, [], "no R2 at push 2, and no R3 at the branch or the stacked PR");
+  assert.deepEqual(out.seam.stamps, {});
+  assert.equal(out.seam.pushes["/r|fix"], 2);
+  assert.equal(out.seam.epochs["/r"], 2);
+  assert.ok(out.seam.own.includes("/r|fix-a"), "ownership is still recorded");
+  const live = seamBefore({ command: "git push origin fix", cwd: "/r", seam: out.seam });
+  assert.deepEqual(live.fired.map((entry) => entry.kind), ["push"], "the next emitted push fires R2");
+});
+
 test("a revision 20 state loads: its lastFired is dropped and does not quiet R2", () => {
   const seam = { epochs: { "/r": 1 }, pushes: { "/r|fix": 1 }, own: [], rounds: { "dir:/r#3": 1 }, stamps: { "review:dir:/r#3": "/r@1" }, lastFired: { "/r": 1 } };
   const out = seamBefore({ command: "git push origin fix", cwd: "/r", seam });
