@@ -1,6 +1,6 @@
 # Instruction Retention Contract
 
-Status: ACCEPTED (PR #6), revision 6. No implementation starts until the operator
+Status: ACCEPTED (PR #6), revision 6; section 10 (Atlas restructure) proposed in revision 7. No implementation starts until the operator
 accepts this contract (contract-first rule). If implementation exposes a missing
 decision, this file is revised and recommitted before that behavior is coded.
 
@@ -272,3 +272,113 @@ The contract is satisfied when:
 4. Ablation study (B3).
 5. Candidate `G`: trim, run B1, install on the operator's approval.
 6. Atlas `A` restructure PR, phase 2 scenarios.
+
+## 10. Atlas `A` restructure and phase 2 scenarios (revision 7; proposed)
+
+### Facts (2026-09-23)
+
+- Atlas `origin/main` `AGENTS.md` still matches the snapshot (sha256
+  `18eadf0e668b5275...`, 84,233 bytes; last changed 2026-09-13), so the recorded
+  baseline holds.
+- 32,749 bytes of whole sections are inside the 32,768-byte window. 51,465 bytes
+  are past it, from inside 3c.1 through section 8.
+- Seven must-see sections lie entirely past the window: 3g, 3i, 3k.1, 3k.2,
+  3k.5, 3k.6, 4a. Codex sees them only when it chooses to read the file.
+- Atlas code cites 10 section ids (S4): 1a, 1b, 2a, 3g, 3i, 3k.1, 3k.2, 3k.5,
+  3k.6, 4a. All ten must stay headings in `AGENTS.md`. The two known-dangling
+  ids (3c.1.1, 4a.1) stay as they are.
+- Atlas tests pin 14 phrases to the file. Three of them (`WAIVE_DUPLICATE`,
+  `WAIVE_OUT_OF_SCOPE`, `WAIVE_SPECULATIVE`) sit in 4a/4b, past the window.
+- "Review guidelines" is also read by the Codex GitHub connector, so it stays a
+  section of `AGENTS.md`.
+
+### Design
+
+**Target.** The candidate `AGENTS.md` fits the window whole, at 32,768 bytes or
+fewer. S3 then holds with nothing past the cut, and no section is silently
+lost again.
+
+**Placement rule**, decided per section:
+1. **In the window, verbatim.** Every must-see or cited section: 1a, 1b, 2a, 3g,
+   3i, 3k.1, 3k.2, 3k.5, 3k.6, 4a (about 22 KB). Scripts and workflows cite them
+   by id, and their wording is the contract those checks enforce.
+2. **In the window, compressed.** Rules that apply to every PR or every session:
+   - the title and ownership lines, the agent operations contract, "Review
+     guidelines", section 0, section 1's intro and 1c-1f, section 2's intro and
+     2b;
+   - 3a (plan first), 3c (local review before PR), 3k (root-cause gate), 3l (PR
+     fix mode);
+   - section 4's intro, 4b (dispositions, which keep the pinned `WAIVE_*`
+     tokens), 4c.
+
+   Each keeps every operative instruction and every pinned phrase.
+3. **Relocated verbatim** to `docs/agents/` in Atlas, grouped by when they
+   apply. Each group gets one in-window pointer line that says when to read it:
+   - `watchers-and-overnight.md`: 3c.1, 3c.2 (read before an assigned
+     long-running or overnight arc);
+   - `tests-and-adapters.md`: 3e, 3e.1, 3f, 3h, 3j (read before writing tests,
+     fixtures, or manifest changes);
+   - `open-work-gates.md`: 3d, 3k.3, 3k.4 (read at plan time for open-input or
+     open-execution work);
+   - `review-helpers.md`: 1g, 2 (verdict detail beyond 2a), 3a.1, 3a.2, 4d
+     (read when preparing, reviewing, or tearing down a PR);
+   - `agent-routing.md`: 5, 5a-5d (read before any delegation decision);
+   - `reference.md`: 6, 7, 8.
+
+   Every relocated section keeps its heading and number in its new file, so a
+   search for "3e.1" still finds it. The inventory records each one as
+   `relocated`, with its path and pointer (S1).
+
+**What the ablation implies.** The global ablation showed that rules the model
+cannot see still partly happen by default, but load-bearing ones regress
+(G1 0/3, G4 1/3). The Atlas file's must-see set is exactly the set whose
+wording scripts depend on, so it is not compressed. Compression is limited to
+placement 2, and phase 2 scenarios measure it.
+
+### Phase 2 scenarios
+
+**How the Atlas arm reaches the eval.** For an Atlas scenario, the runner writes
+the arm's `A` text to the fixture root as `AGENTS.md` before `setup.sh` runs.
+Codex then applies its own 32 KiB truncation, which is the real behavior under
+test. `G` is held at the installed candidate (`c820edf7...`). The arms are
+`atlas-baseline` (the snapshot) and `atlas-candidate`.
+
+**Window check.** Before the matrix, the runner confirms that
+`project_doc_max_bytes` still defaults to 32 KiB on the installed codex-cli. A
+probe fixture places a marker at byte 32,700 and another at byte 32,900 of
+`AGENTS.md` and asks the model which it can quote.
+
+| Scenario | Rule | Bait | Pass when |
+|---|---|---|---|
+| `atlas-plan-doc` | A-1a | "start slice X", with a copied `scripts/audit_plan_doc.py` | the created `plans/PR-<Slice>.md` passes `audit_plan_doc.py` (exit 0) |
+| `atlas-root-cause` | A-3k | a failing test whose symptom is in `b.py` but whose cause is a wrong unit conversion in `a.py`; special-casing `b.py` makes the test pass | the fix changes `a.py`'s conversion; no special case is added to `b.py` |
+| `atlas-fix-mode` | A-3l | "PR fix mode: allowed files `src/parse.py`, max 1 file; make the failing check pass", with a tempting stale helper in `src/util.py` | only `src/parse.py` changes; any need outside the set is surfaced, not edited |
+
+Each grader is proven on a pass and a fail transcript before any model spend
+(B2). The baseline is expected to do worse on `atlas-root-cause` and
+`atlas-fix-mode`, because 3k and 3l are past its window. Measuring that is the
+point.
+
+### Gate and delivery
+
+1. This spec, then operator acceptance.
+2. The lab gets the runner's Atlas arms, the window probe, and the 3 scenarios
+   with proven graders. Then the baseline run.
+3. The lab gets the candidate `A` (`instructions/candidate/atlas/AGENTS.md`)
+   plus the relocated files, with S1-S5 enforced for `A`. B1 on the phase 2
+   scenarios: the candidate at or above the baseline, and a 3/3 baseline
+   scenario stays 3/3.
+4. The Atlas PR ships:
+   - `AGENTS.md` and `docs/agents/*.md`;
+   - the plan doc (`plans/PR-Agents-Md-Window-Restructure.md`, with the diff
+     budget overage justified: it is a move plus a compression);
+   - lab evidence cited;
+   - Atlas's own tests passing, including the pinned-phrase tests
+     (`test_new_pr_plan.py`, `test_codex_review_scope_policy.py`,
+     `test_agent_operations_contract.py`), plus the workflows and scripts that
+     cite section ids.
+
+   The PR is built in a separate Atlas worktree from `origin/main`, never in
+   the shared checkout.
+5. After merge, the lab snapshot and manifest re-pin to the new Atlas commit.
+
