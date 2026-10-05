@@ -8,6 +8,7 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { decide, readJson, sessionFile, writeJsonAtomic } from "./guard.mjs";
+import { withSessionLock } from "./lib/session-lock.mjs";
 
 const EVENTS = new Set(["PreToolUse", "PostToolUse"]);
 const noStopGates = () => ({ findings: [], errors: [] });
@@ -40,11 +41,15 @@ export function run(rawInput, env = process.env) {
   const input = JSON.parse(rawInput || "{}");
   writeJsonAtomic(path.join(dir, "heartbeat.json"), { at: new Date().toISOString(), event: input.hook_event_name ?? null, session: input.session_id ?? null });
   const file = sessionFile(dir, input.session_id);
-  const { output, state, log, errors } = decideClaude(input, readJson(file, { pending: [] }));
-  writeJsonAtomic(file, state);
-  for (const entry of log) appendFileSync(path.join(dir, "redirects.jsonl"), JSON.stringify({ at: new Date().toISOString(), session: input.session_id ?? null, ...entry }) + "\n");
-  for (const error of errors ?? []) appendFileSync(path.join(dir, "errors.log"), `${new Date().toISOString()} ${error}\n`);
-  return output;
+  // Claude runs the hooks of parallel tool calls concurrently: one session's
+  // read, decide, and write is serialized (revision 20).
+  return withSessionLock(file, () => {
+    const { output, state, log, errors } = decideClaude(input, readJson(file, { pending: [] }));
+    writeJsonAtomic(file, state);
+    for (const entry of log) appendFileSync(path.join(dir, "redirects.jsonl"), JSON.stringify({ at: new Date().toISOString(), session: input.session_id ?? null, ...entry }) + "\n");
+    for (const error of errors ?? []) appendFileSync(path.join(dir, "errors.log"), `${new Date().toISOString()} ${error}\n`);
+    return output;
+  });
 }
 
 export function main(stdinText, env = process.env, write = (text) => process.stdout.write(text)) {

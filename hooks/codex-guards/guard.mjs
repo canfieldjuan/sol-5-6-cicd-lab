@@ -12,6 +12,7 @@ import { checkGhFields, satisfiesGhFields } from "./guards/gh-fields.mjs";
 import { checkRediscoveryBefore } from "./guards/rediscovery.mjs";
 import { answeredScope, checkScope, loadScope, scopeBaseline, scopeDrift } from "./guards/scope.mjs";
 import { readRollout } from "./lib/rollout.mjs";
+import { withSessionLock } from "./lib/session-lock.mjs";
 import { CODE as SEAM, seamAfter, seamBefore } from "./guards/seam.mjs";
 import { checkEvidence } from "./stop/evidence-gate.mjs";
 
@@ -194,6 +195,11 @@ export function run(rawInput, env = process.env) {
   const file = sessionFile(dir, input.session_id);
   // Per-machine guard config (contract revision 8); absent config = those guards do nothing.
   const config = readJson(path.join(dir, "config.json"), {});
+  // One session's read, decide, and write is serialized (revision 20).
+  return withSessionLock(file, () => decideAndRecord(input, file, dir, config, env));
+}
+
+function decideAndRecord(input, file, dir, config, env) {
   const previous = readJson(file, { pending: [] });
   // Scope baseline (revision 12): snapshot at the first guard event where scope.json is active.
   if (!previous.scopeBaseline) {
