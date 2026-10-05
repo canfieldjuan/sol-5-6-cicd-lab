@@ -220,3 +220,13 @@ test("both targets keep the replaced config file's permission bits (revision 20)
     assert.equal((await stat(codex.paths.hooksJson)).mode & 0o777, 0o640, "hooks.json keeps its mode");
   } finally { await rm(codex.root, { recursive: true, force: true }); }
 });
+
+test("an entry written with Windows separators is recognized, so a re-run appends no duplicate", () => {
+  for (const [events, script, mark] of [[undefined, "guard.mjs", undefined], [CLAUDE_EVENTS, "claude-seam.mjs", "/lab-guards/claude-seam.mjs"]]) {
+    const windows = `node 'C:\\Users\\u\\.agent\\hooks\\lab-guards\\${script}'`;
+    const once = mergeHooks({}, windows, events, mark);
+    const again = mergeHooks(once, windows, events, mark);
+    assert.deepEqual(again, once, script);
+    for (const list of Object.values(again.hooks)) assert.equal(list.length, 1, script);
+  }
+});

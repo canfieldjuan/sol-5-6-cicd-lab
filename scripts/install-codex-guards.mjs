@@ -65,13 +65,16 @@ async function readOptional(file) {
 
 // Returns the merged hooks object: every existing entry and every other key
 // untouched and in place, guard entries appended where missing. An entry is
-// recognized by its install-dir-relative script path.
+// recognized by its install-dir-relative script path, with separators
+// normalized: a Windows install writes backslashes into the command, and a
+// missed match would append a duplicate entry on every re-run.
+const slashes = (text) => String(text).replaceAll("\\", "/");
 export function mergeHooks(existing, guardCommand, events = HOOK_EVENTS, mark = "/lab-guards/guard.mjs") {
   const config = structuredClone(existing ?? {});
   config.hooks ??= {};
   for (const { event, matcher, statusMessage } of events) {
     const list = (config.hooks[event] ??= []);
-    const present = list.some((group) => (group.hooks ?? []).some((hook) => String(hook.command).includes(mark)));
+    const present = list.some((group) => (group.hooks ?? []).some((hook) => slashes(hook.command).includes(slashes(mark))));
     if (!present) list.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: guardCommand, timeout: 10, ...(statusMessage ? { statusMessage } : {}) }] });
   }
   return config;
