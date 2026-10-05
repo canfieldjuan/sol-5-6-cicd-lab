@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 19; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 20; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms) and revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -154,7 +154,9 @@ product code.
   number, goal line). When it is active, writes outside the globs and commands
   in another repo are denied with a redirect naming the scope.
 - **H6 Claude isolation.** Codex guards are separate modules. Nothing changes
-  the behavior of hooks Claude Code runs.
+  the behavior of hooks Claude Code runs. (Revision 20: the Codex install
+  still never does; the operator-directed `--claude` target installs the seam
+  redirect for Claude Code and adds only its own entries, section 5.4.)
 - **H7 Trust.** Installers never hand-write `[hooks.state]` trust hashes. An
   untrusted hook is silently skipped (section 5.1), so an installed guard that
   is not trusted does nothing and says nothing. Every installer therefore ends
@@ -948,15 +950,82 @@ nothing ends or holds the turn. The evidence gate at Stop is unchanged. If
 the redirects work, the global AGENTS.md prose on root-cause fixes becomes a
 step-5 trim candidate.
 
-### Open decisions (operator)
+### Claude Code (revision 20)
 
-- The Claude original `~/.claude/hooks/round-guard.sh` is still a Stop
-  questionnaire with the merge/defer menu. Converting it to the same
-  redirects (Claude's PostToolUse and PreToolUse) is an edit outside the lab
-  (the revision 17 precedent), so it is not part of this revision.
-- The inert shell entries in `~/.codex/hooks.json` (section 5.3) still appear
-  as the round guard in the Codex hooks UI. Relabeling or removing them
-  changes trust by position, so that decision is deferred.
+Operator decision (2026-10-04): convert the Claude round guard to the same
+redirects, and remove the round-guard Stop hooks on both sides.
+
+- **Removed.** The `round-guard.sh` Stop entry and script, in `~/.claude/`
+  and in `~/.codex/`. The Codex copy was inert: it reads Claude `tool_use`
+  blocks, and printed nothing on the reproduction rollout. Removing the Codex
+  entry moves the lab guards' Stop entry from `stop:2:0` to `stop:1:0`, so
+  the operator re-trusts it (H7). These are one-time, operator-directed edits
+  made outside the installer (the revision 17 precedent).
+- **One module.** `hooks/codex-guards/claude-seam.mjs` is the Claude Code
+  entry point. It calls the dispatcher's `decide()` with no other guards, as
+  the replay does, so R1-R3, the keys, the epochs, the texts, and SR1-SR7 are
+  the seam module's, unchanged. There is no second implementation.
+- **Registration.** `~/.claude/settings.json` gains a `PreToolUse` and a
+  `PostToolUse` entry with matcher `Bash`, running
+  `node '<install dir>/claude-seam.mjs'`, with the fields the existing Claude
+  entries use (`type`, `command`, `timeout`). Claude Code delivers
+  `hookSpecificOutput.additionalContext` on both events and keeps every
+  hook's context (hooks guide, "Combine results from multiple hooks"). Exit 0
+  with no output leaves the call to the normal flow.
+- **Input mapping.** Claude's Bash `tool_response` is an object. In session
+  transcripts it carries `stdout` and `stderr`; the hooks reference example
+  shows `{type, text}`. The adapter joins `stdout`, `stderr`, and `text`
+  where present, and passes a string as is, which matches the Codex
+  aggregated output that R1 reads. `tool_input.command`, `cwd`, and
+  `session_id` are read as for Codex. Any other tool and any other event give
+  no output.
+- **State and logs.** `~/.local/state/sol-lab/claude-seam/`: one session file
+  per Claude session, `heartbeat.json`, `redirects.jsonl`
+  (`{code: "seam-redirect", kind}`, SR6), and `errors.log`. Nothing is shared
+  with the Codex state.
+- **Fail open (SR5).** Any error exits 0 with no output and appends to
+  `errors.log`.
+- **Installer.** `npm run guards:install -- --claude [--apply]` copies the
+  same guard tree to `~/.claude/hooks/lab-guards/` under its own manifest
+  (`claude-seam-install.json`). It appends only its two entries to
+  `settings.json`, after backing the file up, and never edits, reorders, or
+  removes another entry. `npm run guards:status -- --claude` reports active
+  once a Claude session has run the hook after the install.
+- **H6 amended.** The Codex install still never touches Claude Code. The
+  `--claude` target is a separate, operator-directed install that adds only
+  its own entries.
+- **Parity.** With the Claude round guard removed, the revision 17 round-guard
+  parity case holds the Codex counter to its stated verdicts only, as the
+  test already does when the script is absent. The evidence-gate parity is
+  unchanged.
+
+Failure cases:
+- Claude runs matching hooks in parallel. When `git-guard.sh` denies a push,
+  the adapter has already counted it, as an attempted push counts, and its
+  redirect text can arrive beside the deny.
+- Review text read through an MCP tool or `WebFetch` is not a Bash call, so it
+  gets no R1. R2 still fires at the re-push.
+- The hook applies to Claude sessions that load it. A session already running
+  at install time may keep its earlier hook set; the live check uses a new
+  session.
+
+Settling evidence for revision 20:
+- **Unit.**
+  - The input mapping, for a `stdout`/`stderr` object, `{type, text}`, a
+    string, and a missing response.
+  - R2 on the second push; R1 on a `gh pr view --comments` read whose
+    `stdout` carries review text, and no R1 when `stdout` and `stderr` are
+    empty.
+  - A non-Bash tool and a Stop event give no output.
+  - `main` persists the session state and logs each redirect, and it fails
+    open on malformed input.
+- **Installer.** The Claude target appends exactly two `Bash` entries, keeps
+  every other key and entry in order, is idempotent, and backs up
+  `settings.json`.
+- **Live.** One headless Claude Code session in a scratch repository with a
+  local bare remote and a stub `gh` that prints review text. The second push
+  logs `seam-redirect:push`, the review read logs `seam-redirect:review`, and
+  the session transcript shows the redirect text delivered to the model.
 
 ## 6. Failure cases
 
@@ -1029,3 +1098,6 @@ step-5 trim candidate.
    implementation PR: the guard, dispatcher wiring, the round guard's removal
    from Stop, tests, the replay script, and the scenarios. Then install and
    `guards:status`.
+8. Claude Code seam adapter (revision 20): this revision first, then the
+   adapter, the installer target, and tests in one PR. Then the install, the
+   live check, and `guards:status -- --claude`.
