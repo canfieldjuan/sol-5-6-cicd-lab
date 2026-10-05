@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { decide, main, runStopGates } from "../hooks/codex-guards/guard.mjs";
-import { createdBranches, emptySeam, findingLocations, followupText, prCreate, pushText, quoteArg, reviewReads, reviewText, safePath, seamAfter, seamBefore } from "../hooks/codex-guards/guards/seam.mjs";
+import { branchText, createdBranches, emptySeam, findingLocations, followupText, prCreate, pushText, quoteArg, reviewReads, reviewText, safePath, seamAfter, seamBefore } from "../hooks/codex-guards/guards/seam.mjs";
 import { segments, withoutHeredocs } from "../hooks/codex-guards/lib/shell.mjs";
 import { R } from "./codex-rollout-rows.mjs";
 
@@ -19,7 +19,7 @@ function run(events, state = {}) {
   const results = [];
   let current = { pending: [], ...state };
   for (const [event, command, response] of events) {
-    const result = event === "pre" ? pre(command, current) : post(command, current, response ?? "");
+    const result = event === "pre" ? pre(command, current) : post(command, current, response ?? "reviewer: this still breaks");
     current = result.state;
     results.push(result);
   }
@@ -41,24 +41,26 @@ test("withoutHeredocs near misses: << in quotes, here-strings, and arithmetic ar
   }
 });
 
-test("R1 trips on every review-read form", () => {
+test("R1 trips on every review-read form, keyed by the stated repository, else the directory", () => {
   const cases = [
-    ["gh pr view 12 --comments", ["12"]],
-    ["gh pr view 12 -c", ["12"]],
-    ["gh pr view --comments", ["current"]],
-    ["gh pr view https://github.com/o/r/pull/34 --json reviews,state", ["34"]],
-    ["gh pr view 12 --repo o/r --json=latestReviews", ["12"]],
-    ["gh pr view 12 --json title,comments --jq '.comments[]'", ["12"]],
-    ["gh api repos/o/r/pulls/12/comments --paginate", ["12"]],
-    ["gh api repos/o/r/pulls/12/reviews/99", ["12"]],
-    ["gh api /repos/o/r/issues/12/comments?per_page=100", ["12"]],
-    ["gh api -X GET repos/o/r/pulls/12/comments -f per_page=100", ["12"]],
-    ["gh api graphql -f query='query { repository(owner:\"o\",name:\"r\") { a:pullRequest(number:116) { reviewThreads(first:9) { nodes { id } } } b:pullRequest(number: 118) { reviews(last:3) { nodes { state } } } } }'", ["116", "118"]],
-    ["codex-pr-status --repo o/r --pr 12", ["12"]],
-    ["cd /r && GH_PAGER=cat gh pr view 12 --comments", ["12"]],
-    ["set -e\npython - <<'PY'\nopen('ledger','a').write('x')\nPY\ngh pr view 12 --comments", ["12"]]
+    ["gh pr view 12 --comments", ["dir:/r#12"]],
+    ["gh pr view 12 -c", ["dir:/r#12"]],
+    ["gh pr view --comments", ["dir:/r#current"]],
+    ["gh pr view https://github.com/O/R/pull/34 --json reviews,state", ["o/r#34"]],
+    ["gh pr view 12 --repo o/r --json=latestReviews", ["o/r#12"]],
+    ["gh pr view 12 -R o/r --json title,comments --jq '.comments[]'", ["o/r#12"]],
+    ["gh api repos/o/r/pulls/12/comments --paginate", ["o/r#12"]],
+    ["gh api repos/o/r/pulls/12/reviews/99", ["o/r#12"]],
+    ["gh api /repos/o/r/issues/12/comments?per_page=100", ["o/r#12"]],
+    ["gh api -X GET repos/o/r/pulls/12/comments -f per_page=100", ["o/r#12"]],
+    ["gh api graphql -f query='query { repository(owner:\"o\",name:\"r\") { a:pullRequest(number:116) { reviewThreads(first:9) { nodes { id } } } b:pullRequest(number: 118) { reviews(last:3) { nodes { state } } } } }'", ["o/r#116", "o/r#118"]],
+    ["gh api graphql -f query='query { a:repository(owner:\"o\",name:\"a\") { pullRequest(number:5) { comments(last:1) { nodes { body } } } } b:repository(owner:\"o\",name:\"b\") { pullRequest(number:5) { reviewThreads(first:1) { nodes { id } } } } }'", ["o/a#5", "o/b#5"]],
+    ["codex-pr-status --repo o/r --pr 12", ["o/r#12"]],
+    ["cd /x && GH_PAGER=cat gh pr view 12 --comments", ["dir:/x#12"]],
+    ["set -e\npython - <<'PY'\nopen('ledger','a').write('x')\nPY\ngh pr view 12 --comments", ["dir:/r#12"]]
   ];
-  for (const [command, keys] of cases) assert.deepEqual(reviewReads(command), keys, command);
+  for (const [command, keys] of cases) assert.deepEqual(reviewReads(command, "/r").map((ref) => ref.key), keys, command);
+  assert.deepEqual(reviewReads("gh pr view 12 --comments", "/r").map((ref) => ref.label), ["PR #12"]);
 });
 
 test("R1 near misses: non-review reads, quoted mentions, heredoc bodies, and every write form", () => {
@@ -76,15 +78,45 @@ test("R1 near misses: non-review reads, quoted mentions, heredoc bodies, and eve
     "gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:\"T\"}) { thread { isResolved } } }'",
     "gh api graphql -f query='query { repository(owner:\"o\",name:\"r\") { pullRequest(number:12) { state headRefOid } } }'",
     "gh api repos/o/r/pulls/12"
-  ]) assert.deepEqual(reviewReads(command), [], command);
+  ]) assert.deepEqual(reviewReads(command, "/r"), [], command);
+});
+
+test("R1 needs review text: a status check with no body and an empty output do not fire or use up the epoch", () => {
+  const status = JSON.stringify({ reviewDecision: "APPROVED", reviews: [{ state: "APPROVED", body: "" }], statusCheckRollup: [] });
+  const withBody = JSON.stringify({ reviews: [{ state: "CHANGES_REQUESTED", body: "Zero must be rejected." }] });
+  const [quiet, empty, real] = run([
+    ["post", "gh pr view 12 --json reviewDecision,reviews,statusCheckRollup", status],
+    ["post", "gh pr view 12 --comments", ""],
+    ["post", "gh pr view 12 --json reviews", withBody]
+  ]);
+  assert.equal(context(quiet), null);
+  assert.equal(context(empty), null);
+  assert.match(context(real), /Review feedback on PR #12\./, "the same epoch still fires once review text arrives");
+  assert.doesNotMatch(context(real), /Review round/);
+});
+
+test("repository namespacing: branches by directory, PRs by stated repository", () => {
+  const pushes = run([["pre", "cd /a && git push origin feature"], ["pre", "cd /b && git push origin feature"]]);
+  assert.equal(context(pushes[1]), null, "the first push of feature in /b is not push 2");
+  const prs = run([["post", "gh pr view 12 --repo o/a --comments"], ["post", "gh pr view 12 --repo o/b --comments"], ["pre", "git push origin x"], ["post", "gh pr view 12 --repo o/b --comments"]]);
+  assert.match(context(prs[1]), /Review feedback on PR #12\./, "PR 12 in another repository is its own key");
+  assert.match(context(prs[3]), /Review round 2 on PR #12/);
+  assert.equal(prs[3].state.seam.rounds["o/a#12"], 1, "o/a#12 was not escalated by o/b's rounds");
+  const stack = run([["pre", "cd /a && git push origin feature"], ["pre", "cd /b && gh pr create --base feature --title 'Step 2'"]]);
+  assert.equal(context(stack[1]), null, "--base feature in /b is not /a's own work");
+  for (const base of ["main", "master"]) {
+    const trunk = run([["pre", `git push origin ${base}`], ["pre", `gh pr create --base ${base} --title 'Feature'`]]);
+    assert.equal(context(trunk[1]), null, `--base ${base} is never stacked`);
+    assert.deepEqual(trunk[1].state.seam.own, []);
+  }
 });
 
 test("R1 fires once per PR per push epoch, again after a push with the review-round-2 line, and names each fresh PR", () => {
   const [first, again, , second, multi] = run([
-    ["post", "gh pr view 12 --comments"],
+    ["post", "gh pr view 12 --repo o/r --comments"],
     ["post", "gh api repos/o/r/pulls/12/comments"],
     ["pre", "git push origin fix"],
-    ["post", "gh pr view 12 --comments"],
+    ["post", "gh pr view 12 -R o/r --comments"],
     ["post", "gh api graphql -f query='query { repository(owner:\"o\",name:\"r\") { a:pullRequest(number:12) { comments(last:1) { nodes { body } } } b:pullRequest(number:13) { reviewThreads(first:1) { nodes { id } } } } }'"]
   ]);
   assert.match(context(first), /^\[seam-redirect\] Review feedback on PR #12\./);
@@ -93,7 +125,9 @@ test("R1 fires once per PR per push epoch, again after a push with the review-ro
   assert.equal(context(again), null, "same PR, same epoch: no second redirect");
   assert.match(context(second), /Review round 2 on PR #12: findings that keep arriving in one class/);
   assert.match(context(multi), /Review feedback on PR #13\./, "PR 12 is already stamped in this epoch; 13 is fresh");
-  assert.equal(second.state.seam.rounds["12"], 2);
+  assert.equal(second.state.seam.rounds["o/r#12"], 2);
+  const mixed = run([["post", "gh pr view 12 --comments"], ["post", "gh api repos/o/r/pulls/12/comments"]]);
+  assert.ok(context(mixed[1]), "a directory-scoped and a repository-scoped read are different keys (contract 5.4: no stated repository, no match)");
 });
 
 test("R1 fills concrete trace commands from REST and GraphQL review output, else the generic form", () => {
@@ -108,7 +142,7 @@ test("R1 fills concrete trace commands from REST and GraphQL review output, else
   assert.match(context(filled), /git log -L 12,12:src\/a\.py; git log -L 40,40:src\/b\.py/);
   const [generic] = run([["post", "gh pr view 9 --comments", "reviewer: it breaks"]]);
   assert.match(context(generic), /git blame -L <line>,<line> <path> for each finding/);
-  assert.match(reviewText(["9"], 1, "9", [{ path: "lib/x y.ts", line: 7 }]), /git log -L 7,7:'lib\/x y\.ts'/, "paths with spaces are quoted");
+  assert.match(reviewText(["PR #9"], 1, "PR #9", [{ path: "lib/x y.ts", line: 7 }]), /git log -L 7,7:'lib\/x y\.ts'/, "paths with spaces are quoted");
 });
 
 test("review-derived paths are quoted or dropped: the malicious-path fixture", () => {
@@ -125,20 +159,22 @@ test("review-derived paths are quoted or dropped: the malicious-path fixture", (
   ];
   const locations = findingLocations(JSON.stringify(evil), 20);
   assert.deepEqual(locations.map((l) => l.path), ["a;rm -rf ~.py", "$(curl x).py", "`id`.py", "it's.py"], "newline, leading -, backslash, overlong, and line 0 are dropped");
-  const text = reviewText(["1"], 1, "1", locations.slice(0, 3));
+  const text = reviewText(["PR #1"], 1, "PR #1", locations.slice(0, 3));
   assert.match(text, /git log -L 3,3:'a;rm -rf ~\.py'; git log -L 4,4:'\$\(curl x\)\.py'; git log -L 5,5:'`id`\.py'/);
   assert.equal(quoteArg("it's.py"), "'it'\\''s.py'");
   assert.equal(quoteArg("src/a-b_c.py"), "src/a-b_c.py", "plain paths stay bare");
   for (const bad of ["", "-x", "a\tb", "a\u007fb", "a\\b"]) assert.equal(safePath(bad), false, JSON.stringify(bad));
-  const [onlyBad] = run([["post", "gh api repos/o/r/pulls/2/comments", JSON.stringify([{ path: "-oops", line: 1 }])]]);
+  const [onlyBad] = run([["post", "gh api repos/o/r/pulls/2/comments", JSON.stringify([{ path: "-oops", line: 1, body: "x" }])]]);
   assert.match(context(onlyBad), /git blame -L <line>,<line> <path> for each finding/, "every path dropped: the generic form");
 });
 
 test("own branches come from named pushes, PR heads, and branch-creating commands; HEAD pushes and main never count", () => {
-  assert.deepEqual(createdBranches("git checkout -b feat-a && git switch -c feat-b; git -C /r worktree add -b feat-c ../wt main"), ["feat-a", "feat-b", "feat-c"]);
+  assert.deepEqual(createdBranches("git checkout -b feat-a && git switch -c feat-b dev; git -C /r worktree add -b feat-c ../wt main"), [{ name: "feat-a", dir: null, start: null }, { name: "feat-b", dir: null, start: "dev" }, { name: "feat-c", dir: "/r", start: "main" }]);
   assert.deepEqual(createdBranches("git checkout main && git switch dev && git worktree add ../wt existing"), []);
   const stackedOn = (setup) => context(run([...setup.map((command) => ["pre", command]), ["pre", "gh pr create --base feat-a --title 'Step 2'"]]).at(-1));
-  assert.ok(stackedOn(["git push origin feat-a"]), "a named push");
+  assert.equal(stackedOn(["git push origin feat-a"]), null, "a named push alone is not ownership");
+  assert.equal(stackedOn(["git push origin develop", "git push origin feat-a"]), null);
+  assert.equal(context(run([["pre", "git push origin develop"], ["pre", "gh pr create --base develop --title 'Feature'"]]).at(-1)), null, "a shared default such as develop");
   assert.ok(stackedOn(["gh pr create --head feat-a --base main --title 'Step 1'"]), "the head of an earlier PR");
   assert.ok(stackedOn(["git checkout -b feat-a", "git push -u origin HEAD"]), "a created branch pushed as HEAD");
   assert.ok(stackedOn(["git switch -c feat-a"]), "switch -c");
@@ -161,30 +197,42 @@ test("R2 fires on a re-push when no redirect fired in the epoch, with the round-
 test("R2 near misses: text that mentions a push, and a re-push in an epoch where R1 already fired", () => {
   const ledger = run([["pre", "git push origin fix"], ["pre", "printf '%s' 'fixed; git push origin fix' >> .codex/SESSION_LEDGER.md"], ["pre", 'echo "git push origin fix"'], ["pre", "cat > ship.sh <<'EOF'\ngit push origin fix\nEOF"]]);
   assert.deepEqual(ledger.map(context), [null, null, null, null]);
-  assert.equal(ledger.at(-1).state.seam.pushes.fix, 1);
+  assert.equal(ledger.at(-1).state.seam.pushes["/r|fix"], 1);
   const [, read, push2] = run([["pre", "git push origin fix"], ["post", "gh pr view 3 --comments"], ["pre", "git push origin fix"]]);
   assert.ok(context(read));
   assert.equal(context(push2), null, "R1 already reached the model in this epoch");
 });
 
-test("R3 fires on a PR stacked on an own branch and on a fix-titled PR after a merge; not otherwise", () => {
-  const stacked = run([["pre", "git push -u origin feat-a"], ["pre", "set -e\npython - <<'PY'\nprint('ledger')\nPY\ngh pr create --base feat-a --head feat-b --title 'Next step' --body-file b.md"]]);
-  assert.match(context(stacked[1]), /^\[seam-redirect\] This PR repairs this session's own work \(stacked on feat-a\)/);
-  assert.match(context(stacked[1]), /If feat-a is not merged yet, commit the fix on feat-a instead of stacking a new PR on it\./);
+test("R3 fires on a PR stacked on an own branch; not on a fix title, with or without an earlier merge", () => {
+  const stacked = run([["pre", "git checkout -b feat-a && git push -u origin feat-a"], ["pre", "set -e\npython - <<'PY'\nprint('ledger')\nPY\ngh pr create --base feat-a --head feat-b --title 'Next step' --body-file b.md"]]);
+  assert.match(context(stacked[1]), /^\[seam-redirect\] This PR is stacked on this session's own work \(feat-a\)\. If it fixes a defect feat-a introduced/);
+  assert.match(context(stacked[1]), /If feat-a is not merged yet, move the fix onto feat-a and close this PR as superseded\./);
   assert.deepEqual(kinds(stacked[1]), ["followup"]);
   const fix = run([["post", "gh pr merge 7 --squash"], ["pre", 'gh pr create --base main --title "Fix the date parser regression"']]);
-  assert.match(context(fix[1]), /a fix after this session merged a PR/);
+  assert.equal(context(fix[1]), null, "a merge and a fix title do not tie the PR to merged work");
+  assert.equal(fix[1].state.seam.merged, undefined, "merges are not tracked");
   assert.equal(context(run([["pre", 'gh pr create --base main --title "Add the export button"']])[0]), null, "base main, feature title");
-  assert.equal(context(run([["pre", 'gh pr create --base main --title "Fix typo"']])[0]), null, "fix title, but nothing merged in this session");
-  assert.deepEqual(prCreate("gh pr create -B dev -t 'Fix x' -H y"), { base: "dev", title: "Fix x", head: "y" });
+  assert.equal(context(run([["pre", 'gh pr create --base main --title "Fix typo"']])[0]), null, "fix title, nothing merged");
+  assert.deepEqual(prCreate("gh pr create -B dev -t 'Fix x' -H y"), { base: "dev", head: "y" });
+});
+
+test("R3 fires earliest at a branch started from own work, before any PR; not from main or a branch the session never created", () => {
+  const early = run([["pre", "git checkout -b feat-a"], ["pre", "git checkout -b fix-a feat-a"]]);
+  assert.equal(context(early[1]), branchText("fix-a", "feat-a"));
+  assert.deepEqual(kinds(early[1]), ["followup"]);
+  assert.ok(context(run([["pre", "gh pr create --head feat-a --base main --title 'A'"], ["pre", "git switch -c fix-a feat-a"]]).at(-1)), "switch -c from a PR head");
+  assert.ok(context(run([["pre", "git checkout -b feat-a"], ["pre", "git worktree add -b fix-a ../wt feat-a"]]).at(-1)), "worktree add -b with a start point");
+  assert.equal(context(run([["pre", "git checkout -b fix-a main"]]).at(-1)), null, "from main");
+  assert.equal(context(run([["pre", "git push origin shared"], ["pre", "git checkout -b fix-a shared"]]).at(-1)), null, "a pushed-only branch is not own");
+  assert.equal(context(run([["pre", "git checkout -b feat-a"], ["pre", "git checkout -b other"]]).at(-1)), null, "no start point stated");
 });
 
 test("SR7: no redirect text asks a question, asks for a reply, or offers merge, defer, or stop", () => {
   const banned = /\?|\b(answer|reply|recommend|merge|defer|stop)\b/i;
   const texts = [
-    reviewText(["1"], 1, "1", []), reviewText(["1", "2"], 2, "2", [{ path: "a", line: 1 }]), reviewText(["current"], 3, "current", []),
+    reviewText(["PR #1"], 1, "PR #1", []), reviewText(["PR #1", "PR #2"], 2, "PR #2", [{ path: "a", line: 1 }]), reviewText(["the current branch's PR"], 3, "the current branch's PR", []),
     pushText(2, "`x`"), pushText(3, "`x`"), pushText(9, "the current branch in /r"),
-    followupText("stacked on a", "a"), followupText("a fix after this session merged a PR", "the PR it repairs")
+    followupText("a"), branchText("fix-a", "feat-a")
   ];
   for (const text of texts) assert.doesNotMatch(text, banned, text);
 });
@@ -201,11 +249,12 @@ test("output shapes: PostToolUse and PreToolUse additionalContext (probe Q4, Q10
 
 test("dispatcher: a denied call counts no push; another guard's context and a seam redirect are joined and both logged", () => {
   const deny = { code: "x", check: () => ({ action: "deny", reason: "[x] no", pending: { code: "x" } }) };
-  const denied = decide({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "git push origin a" } }, { pending: [], seam: { ...emptySeam(), pushes: { a: 1 }, own: ["a"], epoch: 1 } }, { guards: [deny] });
+  const seeded = { ...emptySeam(), pushes: { "?|a": 1 }, own: ["?|a"], epoch: 1 };
+  const denied = decide({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "git push origin a" } }, { pending: [], seam: seeded }, { guards: [deny] });
   assert.equal(denied.output.hookSpecificOutput.permissionDecision, "deny");
-  assert.equal(denied.state.seam.pushes.a, 1, "the refused push is not counted");
+  assert.equal(denied.state.seam.pushes["?|a"], 1, "the refused push is not counted");
   const hint = { code: "y", check: () => ({ action: "context", kind: "context", reason: "[y] hint" }) };
-  const joined = decide({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "git push origin a" } }, { pending: [], seam: { ...emptySeam(), pushes: { a: 1 }, own: ["a"], epoch: 1 } }, { guards: [hint] });
+  const joined = decide({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "git push origin a" } }, { pending: [], seam: seeded }, { guards: [hint] });
   assert.match(context(joined), /^\[y\] hint\n\n\[seam-redirect\] Push 2/);
   assert.deepEqual(joined.log, [{ code: "y", kind: "context" }, { code: "seam-redirect", kind: "push" }]);
   const patch = decide({ hook_event_name: "PreToolUse", tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n+git push origin a\n" } }, { pending: [] }, { guards: [] });
@@ -247,7 +296,7 @@ test("nothing for fix loops runs at Stop: 5, 10, and 20 pushes give no round-gua
 });
 
 test("seamBefore and seamAfter are pure: the input state is not mutated", () => {
-  const seam = { ...emptySeam(), pushes: { a: 1 }, own: ["a"], epoch: 1 };
+  const seam = { ...emptySeam(), pushes: { "?|a": 1 }, own: ["?|a"], epoch: 1 };
   const frozen = JSON.stringify(seam);
   seamBefore({ command: "git push origin a", seam });
   seamAfter({ command: "gh pr view 1 --comments", response: "", seam });

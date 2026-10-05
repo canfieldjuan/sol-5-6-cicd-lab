@@ -1,5 +1,6 @@
+import path from "node:path";
 import { segments, withoutHeredocs } from "../lib/shell.mjs";
-import { pushesIn } from "../stop/round-guard.mjs";
+import { directoryOf, pushesIn } from "../stop/round-guard.mjs";
 
 // Seam redirect (contract 5.4, revision 18). At the start of each fix round
 // the model gets a short list of next actions: trace the finding to the change
@@ -9,7 +10,7 @@ import { pushesIn } from "../stop/round-guard.mjs";
 // hook input and the session state (SR4).
 //
 // R1 review read (PostToolUse), R2 re-push of an own branch (PreToolUse), R3
-// follow-up PR on own work (PreToolUse). At most one redirect per key per push
+// a branch or PR stacked on own work (PreToolUse). At most one redirect per key per push
 // epoch (SR3); R2 also stays quiet when any redirect already fired in the epoch.
 
 export const CODE = "seam-redirect";
@@ -23,10 +24,19 @@ const VALUE_FLAGS = new Set([
   "-B", "--base", "--head", "--title", "-b", "--body", "--body-file", "-a", "--assignee",
   "-l", "--label", "-m", "--milestone", "-r", "--reviewer", "--project", "--recover", "--pr"
 ]);
-const FIX_TITLE = /\b(fix(es|ed)?|follow[- ]?up|regression|revert|repair|restore|correct)\b/i;
+// Integration targets, never own work: a PR against them is the normal case,
+// and sessions push them in fixture setup (4 false R3s in the noise replay).
+const DEFAULT_BRANCHES = new Set(["main", "master"]);
+
+// Repository namespacing (contract 5.4): branch keys carry the command's
+// directory, PR keys the stated repository, else the directory. The hook
+// cannot see `workdir` (probe Q7), so a repo switch made only through it
+// still shares a directory key.
+const branchKey = (dir, name) => `${dir ?? "?"}|${name}`;
+const repoScope = (owner, name) => `${owner}/${name}`.toLowerCase();
 
 export function emptySeam() {
-  return { epoch: 0, pushes: {}, own: [], merged: false, rounds: {}, stamps: {}, lastEpoch: -1 };
+  return { epoch: 0, pushes: {}, own: [], rounds: {}, stamps: {}, lastEpoch: -1 };
 }
 
 function commandWords(command) {
@@ -54,30 +64,58 @@ function readArgs(words) {
   return { flags, positionals, first, all };
 }
 
-function prKey(positional) {
-  if (positional === undefined) return "current";
-  const url = /\/pull\/(\d+)/.exec(positional);
-  if (url) return url[1];
-  return positional.replace(/^#/, "");
+function prRef(scope, number) {
+  const label = number === "current" ? "the current branch's PR" : /^\d+$/.test(number) ? `PR #${number}` : `PR ${number}`;
+  return { key: `${scope}#${number}`, label };
 }
 
-const REST_REVIEW = /^\/?repos\/[^/]+\/[^/]+\/(?:pulls\/(\d+)\/(?:comments|reviews)(?:\/.*)?|issues\/(\d+)\/comments(?:\/.*)?)$/;
+// The PR a `gh pr view` positional names, and the repository a URL states.
+function viewTarget(positional) {
+  if (positional === undefined) return { number: "current", repo: null };
+  const url = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(positional);
+  if (url) return { number: url[3], repo: repoScope(url[1], url[2]) };
+  return { number: positional.replace(/^#/, ""), repo: null };
+}
 
-// PR keys a command reads review feedback for (R1). Writes are excluded.
-export function reviewReads(command) {
-  const keys = [];
+// Each pullRequest(number:) in a GraphQL query, with the repository(...) that
+// encloses it (the nearest one before it), when the query states one.
+function graphqlPulls(query) {
+  const repos = [...query.matchAll(/repository\s*\(([^)]*)\)/g)].map((match) => {
+    const owner = /owner\s*:\s*"([^"]+)"/.exec(match[1]);
+    const name = /name\s*:\s*"([^"]+)"/.exec(match[1]);
+    return { index: match.index, repo: owner && name ? repoScope(owner[1], name[1]) : null };
+  });
+  return [...query.matchAll(/pullRequest\s*\(\s*number\s*:\s*(\d+)/g)].map((match) => {
+    const enclosing = repos.filter((repo) => repo.index < match.index).pop();
+    return { number: match[1], repo: enclosing?.repo ?? null };
+  });
+}
+
+const REST_REVIEW = /^\/?repos\/([^/]+)\/([^/]+)\/(?:pulls\/(\d+)\/(?:comments|reviews)(?:\/.*)?|issues\/(\d+)\/comments(?:\/.*)?)$/;
+
+// PRs a command reads review feedback for (R1), as {key, label}. Writes are
+// excluded. Keys are scoped by the stated repository, else the directory.
+export function reviewReads(command, cwd = null) {
+  const found = [];
+  const dirScope = `dir:${directoryOf(withoutHeredocs(String(command)), cwd) ?? "?"}`;
+  const add = (number, repo) => found.push(prRef(repo ?? dirScope, number));
+  const stated = (args) => { const value = args.first("--repo", "-R"); return typeof value === "string" && value.includes("/") ? repoScope(...value.split("/").slice(-2)) : null; };
   for (const words of commandWords(command)) {
     const tool = words[0].split("/").pop();
     if (tool === "codex-pr-status") {
-      const pr = readArgs(words.slice(1)).first("--pr");
-      if (typeof pr === "string") keys.push(pr);
+      const args = readArgs(words.slice(1));
+      const pr = args.first("--pr");
+      if (typeof pr === "string") add(pr, stated(args));
       continue;
     }
     if (tool !== "gh") continue;
     if (words[1] === "pr" && words[2] === "view") {
       const args = readArgs(words.slice(3));
       const fields = String(args.first("--json") ?? "").split(",");
-      if (args.flags.has("--comments") || args.flags.has("-c") || fields.some((field) => REVIEW_FIELDS.has(field))) keys.push(prKey(args.positionals[0]));
+      if (args.flags.has("--comments") || args.flags.has("-c") || fields.some((field) => REVIEW_FIELDS.has(field))) {
+        const target = viewTarget(args.positionals[0]);
+        add(target.number, target.repo ?? stated(args));
+      }
       continue;
     }
     if (words[1] !== "api") continue;
@@ -89,16 +127,17 @@ export function reviewReads(command) {
     if (endpoint === "graphql") {
       const query = args.all("-f", "-F", "--field", "--raw-field").filter((value) => typeof value === "string" && value.startsWith("query=")).map((value) => value.slice(6)).join("\n");
       if (!query || /^\s*mutation\b/.test(query) || !/\b(reviewThreads|reviews|comments)\b/.test(query)) continue;
-      for (const match of query.matchAll(/pullRequest\s*\(\s*number\s*:\s*(\d+)/g)) keys.push(match[1]);
+      for (const pull of graphqlPulls(query)) add(pull.number, pull.repo);
       continue;
     }
     const path = endpoint.split("?")[0];
     // Field flags make gh send a POST unless the method is stated as GET.
     if (path.endsWith("/replies") || (explicit === undefined && [...FIELD_FLAGS].some((flag) => args.flags.has(flag)))) continue;
     const rest = REST_REVIEW.exec(path);
-    if (rest) keys.push(rest[1] ?? rest[2]);
+    if (rest) add(rest[3] ?? rest[4], repoScope(rest[1], rest[2]));
   }
-  return [...new Set(keys)];
+  const seen = new Set();
+  return found.filter((ref) => !seen.has(ref.key) && seen.add(ref.key));
 }
 
 // `gh pr create` details (R3), or null.
@@ -107,38 +146,64 @@ export function prCreate(command) {
     if (words[0].split("/").pop() !== "gh" || words[1] !== "pr" || words[2] !== "create") continue;
     const args = readArgs(words.slice(3));
     const text = (value) => (typeof value === "string" ? value : null);
-    return { base: text(args.first("--base", "-B")), title: text(args.first("--title", "-t")), head: text(args.first("--head", "-H")) };
+    return { base: text(args.first("--base", "-B")), head: text(args.first("--head", "-H")) };
   }
   return null;
 }
 
-// Branch names a command shows the session created (own-branch sources).
+// Branches a command shows the session created (own-branch sources), each
+// with its start point when stated and the `git -C` directory when stated.
 export function createdBranches(command) {
-  const names = [];
+  const created = [];
   for (const words of commandWords(command)) {
     if (words[0].split("/").pop() !== "git") continue;
     let i = 1;
-    while (i < words.length && words[i] === "-C") i += 2;
+    let dir = null;
+    while (i < words.length && words[i] === "-C") { dir = words[i + 1] ?? null; i += 2; }
     const [verb, ...rest] = words.slice(i);
-    const after = (flags) => { const index = rest.findIndex((word) => flags.includes(word)); return index >= 0 ? rest[index + 1] : undefined; };
-    const name = verb === "checkout" ? after(["-b", "-B"]) : verb === "switch" ? after(["-c", "-C", "--create", "--force-create"]) : verb === "worktree" && rest[0] === "add" ? after(["-b", "-B"]) : undefined;
-    if (name && !name.startsWith("-")) names.push(name);
+    const flags = verb === "checkout" ? ["-b", "-B"] : verb === "switch" ? ["-c", "-C", "--create", "--force-create"] : verb === "worktree" && rest[0] === "add" ? ["-b", "-B"] : null;
+    if (!flags) continue;
+    const at = rest.findIndex((word) => flags.includes(word));
+    const name = at >= 0 ? rest[at + 1] : undefined;
+    if (!name || name.startsWith("-")) continue;
+    // Positionals after the new name: [start] for checkout/switch, <path> [start] for worktree add.
+    const positionals = rest.slice(at + 2).filter((word) => !word.startsWith("-"));
+    const start = (verb === "worktree" ? positionals[1] : positionals[0]) ?? null;
+    created.push({ name, dir, start });
   }
-  return names;
+  return created;
 }
 
-export function isPrMerge(command) {
-  return commandWords(command).some((words) => words[0].split("/").pop() === "gh" && words[1] === "pr" && words[2] === "merge");
-}
-
-// Up to 3 {path, line} pairs from review output that parses as JSON (one
-// document, or one per line as `--jq` prints). Anything else: none.
-export function findingLocations(response, limit = 3) {
+// The JSON documents in a tool output: one document, or one per line as
+// `--jq` prints. Text that is not JSON gives none.
+function jsonDocuments(response) {
   const text = typeof response === "string" ? response : JSON.stringify(response ?? "");
+  try { return [JSON.parse(text)]; } catch {}
   const documents = [];
-  try { documents.push(JSON.parse(text)); } catch {
-    for (const line of text.split("\n")) { try { documents.push(JSON.parse(line)); } catch {} }
-  }
+  for (const line of text.split("\n")) { try { documents.push(JSON.parse(line)); } catch {} }
+  return documents;
+}
+
+// R1 fires only when review text arrived (contract 5.4): a JSON output with a
+// non-empty `body` anywhere, or non-empty output that is not JSON. A status
+// check that includes `reviews` but carries no review text, and an empty
+// output, do not fire.
+export function hasReviewText(response) {
+  const text = typeof response === "string" ? response : JSON.stringify(response ?? "");
+  if (!text.trim()) return false;
+  const documents = jsonDocuments(text);
+  if (!documents.length) return true;
+  const walk = (value) => {
+    if (!value || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some(walk);
+    if (typeof value.body === "string" && value.body.trim()) return true;
+    return Object.values(value).some(walk);
+  };
+  return documents.some(walk);
+}
+
+// Up to 3 {path, line} pairs from review output that parses as JSON.
+export function findingLocations(response, limit = 3) {
   const found = [];
   const seen = new Set();
   const walk = (value) => {
@@ -151,7 +216,7 @@ export function findingLocations(response, limit = 3) {
     }
     for (const child of Object.values(value)) walk(child);
   };
-  documents.forEach(walk);
+  jsonDocuments(response).forEach(walk);
   return found.slice(0, limit);
 }
 
@@ -170,12 +235,11 @@ function traceText(locations) {
   return locations.map(({ path, line }) => `git log -L ${line},${line}:${quoteArg(path)}`).join("; ");
 }
 
-const prName = (key) => (key === "current" ? "the current branch's PR" : /^\d+$/.test(key) ? `PR #${key}` : `PR ${key}`);
-
-export function reviewText(keys, round, roundKey, locations) {
-  const names = keys.map(prName);
-  const lines = [`[seam-redirect] Review feedback on ${names.join(", ")}. Before patching the line a finding points at:`];
-  if (round >= 2) lines.push(`Review round ${round} on ${prName(roundKey)}: findings that keep arriving in one class mean the rule lives in more than one place. Consolidate it at one owner in the next commit, instead of fixing the next finding by itself.`);
+// labels: the PRs read ("PR #12"); roundLabel: the one with the most review
+// rounds, named in the escalation line from round 2.
+export function reviewText(labels, round, roundLabel, locations) {
+  const lines = [`[seam-redirect] Review feedback on ${[...new Set(labels)].join(", ")}. Before patching the line a finding points at:`];
+  if (round >= 2) lines.push(`Review round ${round} on ${roundLabel}: findings that keep arriving in one class mean the rule lives in more than one place. Consolidate it at one owner in the next commit, instead of fixing the next finding by itself.`);
   lines.push(
     `- Trace where it came from: ${traceText(locations)}. If the line came from an earlier change in this session, fix that change; do not add a check after it.`,
     "- Find the other copies: search code, tests, and docs for the rule, constant, or field the finding names (rg -n '<name>'). If it lives in more than one place, give it one owner and make the others use it.",
@@ -190,10 +254,18 @@ export function pushText(round, label) {
   return `[seam-redirect] Push ${round} to ${label}: ${round - 1} fix rounds on one change. Findings that keep arriving in one class mean the rule lives in more than one place. Next commit: trace the class to the change that introduced it and consolidate it at one owner, instead of fixing the next finding by itself.`;
 }
 
-export function followupText(source, target) {
+// R3 at a branch started from own work: before any work exists.
+export function branchText(name, start) {
+  return `[seam-redirect] ${name} starts from this session's own unmerged work (${start}). If it fixes a defect ${start} introduced, commit the fix on ${start} instead of a new branch, so the fix lands where the defect came from.`;
+}
+
+// R3 at a PR stacked on own work: the create has run (Q10), so the text is
+// for after it exists. A title or an earlier merge does not tie a PR to the
+// session's work, so only the base triggers it.
+export function followupText(base) {
   return [
-    `[seam-redirect] This PR repairs this session's own work (${source}). Put the fix where the defect came from:`,
-    `- If ${target} is not merged yet, commit the fix on ${target} instead of stacking a new PR on it.`,
+    `[seam-redirect] This PR is stacked on this session's own work (${base}). If it fixes a defect ${base} introduced, put the fix where the defect came from:`,
+    `- If ${base} is not merged yet, move the fix onto ${base} and close this PR as superseded.`,
     "- If it merged, fix the rule at its owner and name the introducing commit in the PR body."
   ].join("\n");
 }
@@ -205,53 +277,66 @@ const clone = (seam) => ({ ...emptySeam(), ...(seam ?? {}), pushes: { ...(seam?.
 export function seamBefore({ command, cwd = null, seam, emit = true }) {
   const next = clone(seam);
   const fired = [];
-  const pushes = pushesIn({ cmd: String(command), workdir: cwd });
-  for (const push of pushes) {
-    const round = (next.pushes[push.key] ?? 0) + 1;
-    const stamp = `push:${push.key}`;
+  const own = (dir, name) => { if (name && !DEFAULT_BRANCHES.has(name) && !next.own.includes(branchKey(dir, name))) next.own.push(branchKey(dir, name)); };
+  const dir = directoryOf(withoutHeredocs(String(command)), cwd);
+  for (const push of pushesIn({ cmd: String(command), workdir: cwd })) {
+    // Named branches are scoped by the push's directory; HEAD and bare keys
+    // already carry it.
+    const subject = push.named ? branchKey(push.dir, push.key) : push.key;
+    const round = (next.pushes[subject] ?? 0) + 1;
+    const stamp = `push:${subject}`;
     if (emit && round >= 2 && next.lastEpoch !== next.epoch && next.stamps[stamp] !== next.epoch) {
       fired.push({ kind: "push", reason: pushText(round, push.label) });
       next.stamps[stamp] = next.epoch;
       next.lastEpoch = next.epoch;
     }
-    next.pushes[push.key] = round;
-    if (!push.key.includes("@") && !next.own.includes(push.key)) next.own.push(push.key);
+    next.pushes[subject] = round;
+    // A push alone is not ownership (contract 5.4): shared branches get pushed too.
     next.epoch += 1;
   }
-  for (const name of createdBranches(command)) if (!next.own.includes(name)) next.own.push(name);
+  for (const created of createdBranches(command)) {
+    const where = created.dir ? (path.isAbsolute(created.dir) || !dir ? created.dir : path.join(dir, created.dir)) : dir;
+    // R3, earliest: a new branch started from own unmerged work.
+    const stamp = `followup:${branchKey(where, created.name)}`;
+    if (emit && created.start && !DEFAULT_BRANCHES.has(created.start) && next.own.includes(branchKey(where, created.start)) && next.stamps[stamp] !== next.epoch) {
+      fired.push({ kind: "followup", reason: branchText(created.name, created.start) });
+      next.stamps[stamp] = next.epoch;
+      next.lastEpoch = next.epoch;
+    }
+    own(where, created.name);
+  }
   const create = prCreate(command);
   if (create) {
-    const stacked = create.base && next.own.includes(create.base);
-    const fixTitled = next.merged && create.title && FIX_TITLE.test(create.title);
-    const key = `followup:${stacked ? create.base : create.title}`;
-    if (emit && (stacked || fixTitled) && next.stamps[key] !== next.epoch) {
-      const source = stacked ? `stacked on ${create.base}` : "a fix after this session merged a PR";
-      fired.push({ kind: "followup", reason: followupText(source, stacked ? create.base : "the PR it repairs") });
+    const stacked = Boolean(create.base) && !DEFAULT_BRANCHES.has(create.base) && next.own.includes(branchKey(dir, create.base));
+    const key = `followup:${branchKey(dir, create.base)}`;
+    if (emit && stacked && next.stamps[key] !== next.epoch) {
+      fired.push({ kind: "followup", reason: followupText(create.base) });
       next.stamps[key] = next.epoch;
       next.lastEpoch = next.epoch;
     }
     // The head of a PR this session opened is its own work from now on.
-    if (create.head && !next.own.includes(create.head)) next.own.push(create.head);
+    own(dir, create.head);
   }
   return { fired, seam: next };
 }
 
-// PostToolUse: R1, and `gh pr merge` for R3's fix-titled branch.
-export function seamAfter({ command, response, seam }) {
+// PostToolUse: R1.
+export function seamAfter({ command, response, cwd = null, seam }) {
   const next = clone(seam);
   const fired = [];
-  if (isPrMerge(command)) next.merged = true;
-  const fresh = reviewReads(command).filter((key) => next.stamps[`review:${key}`] !== next.epoch);
+  const reads = reviewReads(command, cwd);
+  // No review text arrived: no redirect, and no stamp consumed.
+  const fresh = reads.length && hasReviewText(response) ? reads.filter((ref) => next.stamps[`review:${ref.key}`] !== next.epoch) : [];
   if (fresh.length) {
     let round = 0;
-    let roundKey = fresh[0];
-    for (const key of fresh) {
-      next.rounds[key] = (next.rounds[key] ?? 0) + 1;
-      next.stamps[`review:${key}`] = next.epoch;
-      if (next.rounds[key] > round) { round = next.rounds[key]; roundKey = key; }
+    let roundLabel = fresh[0].label;
+    for (const ref of fresh) {
+      next.rounds[ref.key] = (next.rounds[ref.key] ?? 0) + 1;
+      next.stamps[`review:${ref.key}`] = next.epoch;
+      if (next.rounds[ref.key] > round) { round = next.rounds[ref.key]; roundLabel = ref.label; }
     }
     next.lastEpoch = next.epoch;
-    fired.push({ kind: "review", reason: reviewText(fresh, round, roundKey, findingLocations(response)) });
+    fired.push({ kind: "review", reason: reviewText(fresh.map((ref) => ref.label), round, roundLabel, findingLocations(response)) });
   }
   return { fired, seam: next };
 }

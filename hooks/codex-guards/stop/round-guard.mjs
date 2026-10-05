@@ -45,7 +45,7 @@ function resolve(target, base) {
 }
 
 // A leading `cd <dir> &&` overrides the call's workdir (relative to it).
-function directoryOf(cmd, workdir) {
+export function directoryOf(cmd, workdir) {
   const cd = /^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&/.exec(cmd);
   return cd ? resolve(unquote(cd[1]), workdir) : workdir ?? null;
 }
@@ -68,12 +68,15 @@ export function pushesIn({ cmd: raw, workdir = null }) {
     const refspec = REFSPEC.exec(match[2]);
     let branch = refspec ? refspec[1] : "<current-branch>";
     if (FLAGS.has(branch)) branch = "<current-branch>";
-    if (branch !== "HEAD" && branch !== "<current-branch>") { found.push({ key: branch, label: `\`${branch}\`` }); continue; }
-    // Revision 15: HEAD and bare pushes are keyed by directory, so pushes from
-    // different repositories are never counted as one change's rounds.
+    // The push's directory: -C, else a leading cd, else the workdir. Every push
+    // reports it (revision 18, for repository namespacing); only HEAD and bare
+    // pushes are keyed by it, so named keys stay as the Claude original has them.
     const base = directoryOf(cmd, workdir);
     const dir = match[1] ? resolve(unquote(match[1]), base) : base;
-    found.push(dir ? { key: `${branch}@${dir}`, label: `the current branch in ${dir}` } : { key: branch, label: `\`${branch}\`` });
+    if (branch !== "HEAD" && branch !== "<current-branch>") { found.push({ key: branch, label: `\`${branch}\``, named: true, dir }); continue; }
+    // Revision 15: HEAD and bare pushes are keyed by directory, so pushes from
+    // different repositories are never counted as one change's rounds.
+    found.push(dir ? { key: `${branch}@${dir}`, label: `the current branch in ${dir}`, named: false, dir } : { key: branch, label: `\`${branch}\``, named: false, dir });
   }
   return found;
 }

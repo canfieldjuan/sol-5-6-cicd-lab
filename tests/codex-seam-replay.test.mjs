@@ -13,7 +13,7 @@ const at = (replayed, prefix) => redirects(replayed).filter((event) => event.at.
 test("replay: the incident's shape gets a redirect before push 2 and an escalated one before push 3", () => {
   const review = JSON.stringify([{ path: "src/rule.py", line: 12, body: "same class again" }]);
   const rows = [
-    ran("T01", "git push -u origin step-1"),
+    ran("T01", "git checkout -b step-1 && git push -u origin step-1"),
     ran("T02", "set -e\npython - <<'PY'\nopen('.codex/SESSION_LEDGER.md','a').write('x')\nPY\ngh pr create --base step-1 --head step-2 --title 'Step 2'"),
     ran("T03", "git push -u origin step-2"),
     ran("T04", "gh api repos/o/r/pulls/2/comments", review),

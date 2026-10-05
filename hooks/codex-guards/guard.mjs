@@ -153,7 +153,7 @@ function decideInner(input, state, pending, { home, guards, config, stopGates })
       };
       break;
     }
-    const seam = seamEvent(input, command, state, (args) => seamAfter({ ...args, response: input.tool_response }));
+    const seam = seamEvent(input, command, state, (args) => seamAfter({ ...args, response: input.tool_response, cwd: input.cwd }));
     return withSeam(result ?? { output: null, state: { pending } }, seam, "PostToolUse");
   }
 
