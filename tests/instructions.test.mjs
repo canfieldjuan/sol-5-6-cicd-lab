@@ -295,6 +295,22 @@ test("installer installs into a missing target without a backup", async () => {
   } finally { await rm(fx.root, { recursive: true, force: true }); }
 });
 
+test("installer keeps the target's permission bits; a new target gets 0644 (S6, revision 7)", async () => {
+  const { chmod, stat } = await import("node:fs/promises");
+  const fx = await installerFixture("old baseline\n");
+  try {
+    await chmod(fx.target, 0o600);
+    await install({ ...fx, baselineHash: sha256(buf("old baseline\n")), apply: true });
+    assert.equal(await readFile(fx.target, "utf8"), "new rules\n");
+    assert.equal((await stat(fx.target)).mode & 0o777, 0o600, "a 0600 target stays 0600");
+  } finally { await rm(fx.root, { recursive: true, force: true }); }
+  const fresh = await installerFixture(null);
+  try {
+    await install({ ...fresh, baselineHash: "b", apply: true });
+    assert.equal((await stat(fresh.target)).mode & 0o777, 0o644);
+  } finally { await rm(fresh.root, { recursive: true, force: true }); }
+});
+
 test("installer refuses to run while another install holds the lock, and keeps that lock", async () => {
   const fx = await installerFixture("old baseline\n");
   try {

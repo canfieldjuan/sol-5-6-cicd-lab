@@ -14,7 +14,9 @@ import { R } from "./codex-rollout-rows.mjs";
 // both implementations must give. Since revision 17 the Claude originals carry
 // the revision 15-16 fixes too, so a `claude` override remains only where the
 // transcript formats themselves differ. When the Claude scripts are absent
-// (CI), the Codex side is still held to the stated verdicts.
+// (CI), the Codex side is still held to the stated verdicts. Revision 20
+// removed the Claude round guard (Claude Code now runs the seam redirect), so
+// its case checks the Codex counter against the stated verdicts only.
 const CLAUDE_HOOKS = path.join(os.homedir(), ".claude", "hooks");
 const EVIDENCE_SH = path.join(CLAUDE_HOOKS, "evidence-gate.sh");
 const ROUND_SH = path.join(CLAUDE_HOOKS, "round-guard.sh");

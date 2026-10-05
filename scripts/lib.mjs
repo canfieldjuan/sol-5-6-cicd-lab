@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { chmod, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -6,6 +6,17 @@ export const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 
 export async function readJson(file) {
   return JSON.parse(await readFile(file, "utf8"));
+}
+
+// Writes the temp file that will be renamed over `target`, with the target's
+// permission bits (a new target gets `fallbackMode`, if given). A temp file
+// otherwise takes the process umask, so renaming it over a 0600 config file
+// would leave it readable by other users. chmod is not subject to the umask.
+export async function writeReplacement(temporary, content, target, fallbackMode = null) {
+  let mode = fallbackMode;
+  try { mode = (await stat(target)).mode & 0o7777; } catch (error) { if (error.code !== "ENOENT") throw error; }
+  await writeFile(temporary, content);
+  if (mode !== null) await chmod(temporary, mode);
 }
 
 export async function walkFiles(directory) {

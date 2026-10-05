@@ -127,6 +127,7 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - [x] Step 4: Codex ports of evidence-gate and round-guard (revisions 14-16; replay 20 rollouts reviewed; live stop-round 3/3; stop-evidence unexercised 3/3, model verified first).
 - [ ] Step 5: before/after measurement and AGENTS.md trim candidates.
 - [x] Step 6: seam redirect replaces the round guard's Stop checkpoint (revisions 18-19; incident replay redirects before push 2; noise replay 20 rollouts; live seam-review 3/3, seam-push 3/3; consolidation followed the push-2 redirect in all three seam-push runs).
+- [x] Step 6, Claude Code (revision 20): the same seam redirect through `claude-seam.mjs` and `guards:install -- --claude`; the round-guard Stop hooks removed on both sides; live headless Claude session delivered R2 and R1 as `hook_additional_context`.
 
 ## Recovery
 

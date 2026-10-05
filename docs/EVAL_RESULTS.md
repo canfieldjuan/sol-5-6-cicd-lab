@@ -287,6 +287,28 @@ Unit: `npm run check` passes. The new tests cover:
 
 The incident replay passes against the real rollout.
 
+## Seam redirect in Claude Code (2026-10-05)
+
+Contract 5.4, revision 20. `hooks/codex-guards/claude-seam.mjs` runs the same
+seam module for Claude Code (PreToolUse and PostToolUse on Bash), and the
+round-guard Stop hooks are removed on both sides.
+
+**Live** (Claude Code 2.1.287, one headless session, haiku): a scratch
+repository with a local bare remote and a stub `gh` that prints review text.
+The session ran `git push -u origin fix`, a commit, `git push origin fix`,
+and `gh pr view 1 --comments`.
+- `redirects.jsonl` logged `seam-redirect:push` at the second push and
+  `seam-redirect:review` after the read.
+- The session transcript holds a `hook_additional_context` attachment for
+  each, `PreToolUse:Bash` and `PostToolUse:Bash`, carrying the redirect text.
+  R1 firing also shows the adapter reads Claude's real `tool_response`.
+- `npm run guards:status -- --claude` reports active.
+
+Unit: the input mapping for every `tool_response` shape, R1 and R2 through
+`decideClaude`, no output for other tools and events, `main` state, logs, and
+fail-open, the script run as Claude Code runs it, and the installer's Claude
+target and status.
+
 ## Instruction retention: baseline reruns and ablation (2026-09-23)
 
 The 3 baseline cells invalidated by the usage limit were rerun on the same arm
