@@ -197,7 +197,7 @@ parity tests fail.
 
 ## Seam redirect (2026-10-04)
 
-Contract 5.4 (revision 18). Three context-only redirects (R1 review read, R2
+Contract 5.4 (revisions 18-19). Three context-only redirects (R1 review read, R2
 re-push, R3 a branch or PR stacked on own work) replace the round guard's Stop
 checkpoint. Nothing for fix loops runs at Stop.
 
@@ -255,10 +255,23 @@ dropped the fix-title R3 trigger. Replaying the six live rollouts through the
 final code gives the same redirects: one R1 in each seam-review run and two
 R2s in each seam-push run.
 
-After the fix-title trigger was dropped, the noise replay was re-run on the
-same 20 rollouts: its 2 fix-titled R3s are gone, the stacked and branch-time
-R3s remain, and the 18 rollouts that have not grown since give 158 redirects
-(111 / 46 / 1), down from 159.
+**Revision 19** (push epochs per directory scope, ownership only from
+creating forms) and the dropped fix-title trigger, replayed over the same
+sessions. Two of the 20 have grown since, so the counts below use the 18
+that have not:
+
+| Code | Redirects (review / push / follow-up) |
+| --- | --- |
+| Second pass | 159 (111 / 46 / 2) |
+| Fix-title trigger dropped | 158 (111 / 46 / 1) |
+| Revision 19 | 130 (88 / 41 / 1) |
+
+Over all 20 sessions, the old checkpoint's 13 firings each still have a
+redirect 4 pushes earlier. The redirects revision 19 removes were
+escalations driven by pushes in other worktrees. One example is review
+rounds 16-19 on a PR reread from one directory while every push went to a
+different one. Of 254 matching reads, 28 ran from a directory that never
+pushed. 12 of those came from a session with no pushes at all.
 
 Unit: `npm run check` passes. The new tests cover:
 - R1-R3 on both sides;

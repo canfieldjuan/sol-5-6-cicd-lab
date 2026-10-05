@@ -126,7 +126,7 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - [x] Step 3 guard 6 (scope; revisions 12-13: denies out-of-scope writes and cd into other repos, blocks new drift once at Stop; live 3/3).
 - [x] Step 4: Codex ports of evidence-gate and round-guard (revisions 14-16; replay 20 rollouts reviewed; live stop-round 3/3; stop-evidence unexercised 3/3, model verified first).
 - [ ] Step 5: before/after measurement and AGENTS.md trim candidates.
-- [x] Step 6: seam redirect replaces the round guard's Stop checkpoint (revision 18; incident replay redirects before push 2; noise replay 20 rollouts; live seam-review 3/3, seam-push 3/3; consolidation followed the push-2 redirect in all three seam-push runs).
+- [x] Step 6: seam redirect replaces the round guard's Stop checkpoint (revisions 18-19; incident replay redirects before push 2; noise replay 20 rollouts; live seam-review 3/3, seam-push 3/3; consolidation followed the push-2 redirect in all three seam-push runs).
 
 ## Recovery
 
