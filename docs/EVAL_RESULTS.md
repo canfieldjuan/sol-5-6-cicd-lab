@@ -314,10 +314,9 @@ target and status.
 Contract 5.4, revision 21 (PR #34). Revisions 18-20 kept R2 quiet in any epoch
 where another redirect had fired. A fix round starts with a review read, so
 R1 fired first and R2 stayed quiet. In one live Claude Code session in
-another repository, R1 fired 7 times and R2 fired on 1 of 6 re-pushes. R2
-now fires at every re-push, and its text is a check of what the push sends.
-The escalation line goes out once per round: in R1's review-round line when
-one was sent in the epoch, else in R2.
+another repository, R1 fired 7 times and R2 fired on 1 of 6 re-pushes. The
+contract's R2 row, R2 text, and "R2 at every re-push (revision 21)"
+subsection own the new rule; the results below are measured against them.
 
 **Incident replay** (the private reproduction rollout, `SEAM_INCIDENT_ROLLOUT`):
 
