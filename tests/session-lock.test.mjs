@@ -76,7 +76,7 @@ test("the Claude entry point fails open when the lock stays held: no output, no 
   try {
     const env = { ...process.env, SOL_LAB_CLAUDE_SEAM_STATE: dir };
     const file = path.join(dir, "session-s.json");
-    writeFileSync(file, JSON.stringify({ pending: [], seam: { epochs: { "/r": 1 }, pushes: { "/r|fix": 1 }, own: [], rounds: {}, stamps: {}, lastFired: {} } }));
+    writeFileSync(file, JSON.stringify({ pending: [], seam: { epochs: { "/r": 1 }, pushes: { "/r|fix": 1 }, own: [], rounds: {}, stamps: {}, escalated: {} } }));
     writeFileSync(`${file}.lock`, "");
     const out = [];
     claudeMain(JSON.stringify({ hook_event_name: "PreToolUse", session_id: "s", cwd: "/r", tool_name: "Bash", tool_input: { command: "git push origin fix" } }), env, (text) => out.push(text));

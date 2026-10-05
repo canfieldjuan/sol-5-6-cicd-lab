@@ -18,7 +18,7 @@ import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { decide } from "../hooks/codex-guards/guard.mjs";
-import { CODE } from "../hooks/codex-guards/guards/seam.mjs";
+import { CODE, PUSH_ESCALATION } from "../hooks/codex-guards/guards/seam.mjs";
 import { executedCommand } from "../hooks/codex-guards/lib/rollout.mjs";
 import { withoutHeredocs } from "../hooks/codex-guards/lib/shell.mjs";
 import { directoryOf, pushesIn } from "../hooks/codex-guards/stop/round-guard.mjs";
@@ -53,7 +53,8 @@ export function replaySeam(text) {
     const kinds = (result.log ?? []).filter((entry) => entry.code === CODE).map((entry) => entry.kind);
     if (!kinds.length) return;
     const textOut = result.output.hookSpecificOutput.additionalContext;
-    const headlines = textOut.split("\n").filter((line) => line.startsWith("[seam-redirect]") || line.startsWith("Review round"));
+    // Headers and escalation lines: R1's review-round line, R2's escalation (revision 21).
+    const headlines = textOut.split("\n").filter((line) => line.startsWith("[seam-redirect]") || line.startsWith("Review round") || line === PUSH_ESCALATION);
     // Epochs are per directory scope (revision 19); the replay reports the
     // session-wide push count once the redirecting call is counted.
     const afterPushes = Object.values(state.seam?.epochs ?? {}).reduce((sum, n) => sum + n, 0);

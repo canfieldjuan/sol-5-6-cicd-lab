@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { decide, main, runStopGates } from "../hooks/codex-guards/guard.mjs";
-import { branchText, createdBranches, emptySeam, findingLocations, followupText, prCreate, pushText, quoteArg, reviewReads, reviewText, safePath, seamAfter, seamBefore } from "../hooks/codex-guards/guards/seam.mjs";
+import { branchText, createdBranches, emptySeam, findingLocations, followupText, prCreate, PUSH_ESCALATION, pushText, quoteArg, reviewReads, reviewText, safePath, seamAfter, seamBefore } from "../hooks/codex-guards/guards/seam.mjs";
 import { segments, withoutHeredocs } from "../hooks/codex-guards/lib/shell.mjs";
 import { R } from "./codex-rollout-rows.mjs";
 
@@ -142,9 +142,16 @@ test("epochs are per directory scope: a push in another repository starts no rou
   assert.equal(context(reread), null, "a push in /b is not a new round for /a's PR");
   assert.match(context(again), /Review round 2 on PR #12/, "a push in /a is");
   assert.deepEqual(again.state.seam.epochs, { "/b": 1, "/a": 1 });
-  const quiet = run([["pre", "cd /b && git push origin feature"], ["post", "cd /a && gh pr view 12 --comments"], ["pre", "cd /b && git push origin feature"]]);
-  assert.ok(context(quiet[1]));
-  assert.equal(context(quiet[2]), pushText(2, "`feature`"), "an R1 in /a does not quiet R2 in /b");
+  // /a's R1 sends its review-round line in /a's epoch 2; /b's third push is in
+  // /b's epoch 2, so an unscoped marker would drop /b's escalation line.
+  const scoped = run([
+    ["pre", "cd /a && git push origin fix"], ["post", "cd /a && gh pr view 12 --comments"],
+    ["pre", "cd /a && git push origin fix"], ["post", "cd /a && gh pr view 12 --comments"],
+    ["pre", "cd /b && git push origin feature"], ["pre", "cd /b && git push origin feature"], ["pre", "cd /b && git push origin feature"]
+  ]);
+  assert.match(context(scoped[3]), /Review round 2 on PR #12/);
+  assert.deepEqual(scoped[3].state.seam.escalated, { "/a": 2 });
+  assert.equal(context(scoped.at(-1)), pushText(3, "`feature`", true), "an R1 review-round line in /a does not drop R2's escalation line in /b");
   const repoScoped = run([["post", "gh pr view 12 --repo o/r --comments"], ["post", "cd /x && gh pr view 12 --repo o/r --comments"]]);
   assert.ok(context(repoScoped[1]), "a stamp records its scope: one key read from two scopes does not share an epoch");
 });
@@ -215,23 +222,50 @@ test("own branches come from named pushes, PR heads, and branch-creating command
   assert.deepEqual(headOnly.at(-1).state.seam.own, []);
 });
 
-test("R2 fires on a re-push when no redirect fired in the epoch, with the round-3 text from the third push", () => {
+test("R2 fires on every re-push, with the escalation line from the third push", () => {
   const [p1, p2, p3, other] = run([["pre", "git push -u origin fix"], ["pre", "git push origin fix"], ["pre", "git push origin fix"], ["pre", "git push origin other"]]);
   assert.equal(context(p1), null, "first push: no redirect");
   assert.equal(context(p2), pushText(2, "`fix`"));
-  assert.match(context(p3), /^\[seam-redirect\] Push 3 to `fix`: 2 fix rounds on one change\./);
+  assert.match(context(p2), /^\[seam-redirect\] Push 2 to `fix` sends fix round 1 on your own change\. Read the diff it sends before the next review does:\n- If the fix restates a rule in a second place/);
+  assert.equal(context(p3), pushText(3, "`fix`", true));
+  assert.ok(context(p3).endsWith(`\n${PUSH_ESCALATION}`));
   assert.deepEqual(kinds(p3), ["push"]);
   assert.equal(context(other), null, "a first push to a different subject");
   assert.deepEqual(p3.state.seam.epochs, { "/r": 3 }, "epochs are per directory scope");
 });
 
-test("R2 near misses: text that mentions a push, and a re-push in an epoch where R1 already fired", () => {
+test("R2 near misses: text that mentions a push", () => {
   const ledger = run([["pre", "git push origin fix"], ["pre", "printf '%s' 'fixed; git push origin fix' >> .codex/SESSION_LEDGER.md"], ["pre", 'echo "git push origin fix"'], ["pre", "cat > ship.sh <<'EOF'\ngit push origin fix\nEOF"]]);
   assert.deepEqual(ledger.map(context), [null, null, null, null]);
   assert.equal(ledger.at(-1).state.seam.pushes["/r|fix"], 1);
-  const [, read, push2] = run([["pre", "git push origin fix"], ["post", "gh pr view 3 --comments"], ["pre", "git push origin fix"]]);
-  assert.ok(context(read));
-  assert.equal(context(push2), null, "R1 already reached the model in this epoch");
+});
+
+test("R2 fires after an R1 or R3 in the same epoch; R1's review-round line owns the escalation for its round (revision 21)", () => {
+  const [, r1, push2, r1Round2, push3, push4] = run([
+    ["pre", "git push origin fix"], ["post", "gh pr view 3 --comments"], ["pre", "git push origin fix"],
+    ["post", "gh pr view 3 --comments"], ["pre", "git push origin fix"], ["pre", "git push origin fix"]
+  ]);
+  assert.ok(context(r1));
+  assert.equal(context(push2), pushText(2, "`fix`"), "an R1 in this epoch does not quiet R2");
+  assert.deepEqual(kinds(push2), ["push"]);
+  assert.match(context(r1Round2), /Review round 2 on PR #3/);
+  assert.equal(context(push3), pushText(3, "`fix`", false), "R1's review-round line carried the escalation in this epoch");
+  assert.equal(context(push4), pushText(4, "`fix`", true), "no R1 in this epoch: R2 carries it");
+  // R1's first round has no review-round line, so R2 keeps its own.
+  const firstRound = run([["pre", "git push origin fix"], ["pre", "git push origin fix"], ["post", "gh pr view 3 --comments"], ["pre", "git push origin fix"]]);
+  assert.doesNotMatch(context(firstRound[2]), /Review round/);
+  assert.equal(context(firstRound[3]), pushText(3, "`fix`", true));
+  const afterR3 = run([["pre", "git checkout -b feat-a && git push -u origin feat-a"], ["pre", "gh pr create --base feat-a --head feat-b --title 'B'"], ["pre", "git push origin feat-a"]]);
+  assert.deepEqual(kinds(afterR3[1]), ["followup"]);
+  assert.equal(context(afterR3[2]), pushText(2, "`feat-a`"), "an R3 in this epoch does not quiet R2");
+});
+
+test("a revision 20 state loads: its lastFired is dropped and does not quiet R2", () => {
+  const seam = { epochs: { "/r": 1 }, pushes: { "/r|fix": 1 }, own: [], rounds: { "dir:/r#3": 1 }, stamps: { "review:dir:/r#3": "/r@1" }, lastFired: { "/r": 1 } };
+  const out = seamBefore({ command: "git push origin fix", cwd: "/r", seam });
+  assert.deepEqual(out.fired.map((entry) => entry.kind), ["push"]);
+  assert.equal(out.seam.lastFired, undefined);
+  assert.deepEqual(out.seam.escalated, {});
 });
 
 test("R3 fires on a PR stacked on an own branch; not on a fix title, with or without an earlier merge", () => {
@@ -262,7 +296,7 @@ test("SR7: no redirect text asks a question, asks for a reply, or offers merge, 
   const banned = /\?|\b(answer|reply|recommend|merge|defer|stop)\b/i;
   const texts = [
     reviewText(["PR #1"], 1, "PR #1", []), reviewText(["PR #1", "PR #2"], 2, "PR #2", [{ path: "a", line: 1 }]), reviewText(["the current branch's PR"], 3, "the current branch's PR", []),
-    pushText(2, "`x`"), pushText(3, "`x`"), pushText(9, "the current branch in /r"),
+    pushText(2, "`x`"), pushText(3, "`x`", false), pushText(3, "`x`", true), pushText(9, "the current branch in /r", true),
     followupText("a"), branchText("fix-a", "feat-a")
   ];
   for (const text of texts) assert.doesNotMatch(text, banned, text);
