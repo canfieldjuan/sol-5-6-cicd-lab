@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 17; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-17. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 18; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-17, and by revision 18 if accepted (the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -44,6 +44,8 @@ In scope, all in this lab (tracked sources plus installers, the pattern of
 4. Codex ports of the dormant Stop hooks `evidence-gate.sh` and `round-guard.sh`.
 5. Before/after measurement and the list of AGENTS.md rules the mechanisms make
    removable (feeds `instructions/rule-inventory.json`).
+6. A seam redirect (revision 18): context-only redirects at the start of each
+   fix round, which replace the round guard's Stop checkpoint.
 
 Out of scope: changes to Codex itself; the shared `~/.claude/hooks/git_guard.py`
 (it also guards Claude Code and must not change behavior for Claude); Atlas
@@ -506,7 +508,429 @@ case.
 Once installed, Codex turns that cite unbacked counts, SHAs, or test nodes get
 one continuation asking for evidence or a hedge. Fix loops get a
 checkpoint question at 5, 10, 15, and 20 pushes per branch. Neither ends a
-turn.
+turn. (Revision 18 retires the fix-loop checkpoint in favor of the seam
+redirects in section 5.4.)
+
+## 5.4 Step-6 specification: seam redirect (revision 18; accepted in PR #30)
+
+### Reproduction (2026-10-04)
+
+The source is one Codex Desktop session (codex-cli 0.159.2, 2026-10-01 to
+2026-10-04) in a private repository. Branch names, PR numbers, and product
+details are withheld here. "PR A" is the PR whose loop is described below.
+The guard log (`denials.jsonl`) records three `round-guard` firings for the
+session: 2026-10-03T06:15:13Z, 2026-10-04T06:43:52Z, and
+2026-10-04T18:32:23Z. Its `CommandExecution` rows (revision 16) and messages
+show the following:
+- **01:03Z.** PR A is created with `--base` set to a branch the same session
+  had pushed, so it is stacked on the session's own earlier work. This is
+  push 1 of PR A's branch.
+- **01:26Z.** The first read of PR A's review threads
+  (`gh api graphql ... pullRequest(number:N) { ... reviewThreads ...`).
+- **01:29Z, 04:46Z, 05:47Z, 06:13Z.** Pushes 2-5. The round guard fires at
+  tier 5 at 06:15:13Z, about five hours and four pushes after the first
+  review read.
+- **06:16Z.** The model's tier-5 answer contains the seam diagnosis:
+  "Completeness and association must use the same source unit." It also says
+  "Three corrective rounds repaired my code overall".
+- **06:27Z.** The operator types the redirect by hand: "Go back find where you
+  introduced the churn and fix that. Don't start symptom patching. Share seams
+  when possible and cononicsl docs when possible." On 2026-10-04 at 04:10Z the
+  operator repeats it: "fix issues you introduced at the sourc,no symptom
+  patching".
+- **2026-10-04, tier 10.** The model's root cause: "shared rules were
+  implemented incompletely in field-specific checks and duplicated ordering
+  logic. The fixes now use common admission and production-owned ordering."
+  Its decision, as question 4 offered: "merge on green and reviewed; defer the
+  rest." The operator answers "Merge and defer." (14:39Z), and the session
+  runs PR A's merge command at 14:41Z. One deferred item, which the same
+  answer said "belongs in" a follow-up issue, becomes a new branch. That
+  branch reaches 5 pushes: the third firing (18:32:23Z).
+
+Diagnosis:
+- **Timing.** The guard waits for a count. Every early signal was observable
+  to a hook before push 2: the stacked PR create and the first review read.
+- **It is a stop, not a redirect.** The checkpoint arrives at Stop and asks
+  for a report: four questions, then a decision. Questions 3 ("THE CUT") and
+  4 ("THE DECISION: merge now on green, defer the rest to a follow-up issue,
+  or continue") turn the loop into a choice for the operator, with
+  merge-and-defer on the menu. The model picked it, and the deferral became
+  another loop.
+- **The model knows the seam once it looks.** Both checkpoint answers named
+  the shared owner. What was missing was the next action, at the start of a
+  round: trace the finding to its origin and fix it there. The operator's
+  assessment is that prevention would not work well, but an early nudge would
+  let Codex change course instead of stopping.
+
+Operator review of the first draft of this revision (PR #30): "It still
+looks like a stop hook, id rather he redirect." That draft asked for numbered
+one-line answers and kept a reworded Stop checkpoint. This revision drops
+both.
+
+Also observed: the Codex hooks UI lists the inert `~/.codex/hooks/round-guard.sh`
+entry (section 5.3) as a Stop hook. The operator took it for the live guard;
+the live guard is the dispatcher's port.
+
+### Principle: redirect, not stop
+
+- A seam redirect names the next action, and the model takes it in the same
+  turn. It asks for no written answer, no checkpoint report, and no decision
+  from the model or the operator.
+- It lands where the model chooses its next action in a fix round: right
+  after review findings arrive, at a re-push, and at a follow-up PR.
+- No part of the seam redirect runs at Stop. The round guard's Stop
+  checkpoint (section 5.3) is retired, and its push counting moves to the
+  push itself (R2).
+
+### Observable behavior
+
+Definitions:
+- **Push epoch**: the number of `git push` commands the dispatcher has seen at
+  PreToolUse in this session. Pushes are counted with `pushesIn` from
+  `stop/round-guard.mjs` (the command-position rules of revision 16), so one
+  parser defines a push. An attempted push counts, even if the remote rejects
+  it. Hooks see each executed command, so the source-literal loop problem of
+  revision 16 does not apply here.
+- **Own branch**: a branch this session created or opened a PR from,
+  learned without running git (SR4). Either is enough:
+  - the `--head`/`-H` of a `gh pr create` the session ran;
+  - a branch the session created with `git checkout -b`/`-B`,
+    `git switch -c`/`-C`, or `git worktree add -b`/`-B`.
+
+  A push alone is not proof of ownership. Sessions push shared branches too:
+  a default branch such as `develop` or `trunk` in maintenance, and `main` in
+  fixture setup. The noise replay found 4 false "stacked on main" R3
+  redirects when named pushes counted. `main` and `master` are also never
+  own branches, even when created, since a PR against them is the normal
+  case. Neither an unnamed base nor a whole working directory counts as
+  owned. The reproduction is still covered: its stacked base was the
+  `--head` of a PR the same session had opened.
+- **PR key**: the PR number named in the command, or `current` when none is
+  named (`gh pr view --comments` on the checked-out branch).
+- **Repository namespacing.** One session often drives several repositories.
+  The reproduction session read another repository's PR in the same GraphQL
+  query. So every key carries where it belongs:
+  - **Branch keys** (push subjects, own branches, and `gh pr create`
+    `--base`/`--head`) are prefixed with the command's directory: `-C <dir>`,
+    then a leading `cd <dir>`, then the hook `cwd`. `pushesIn` reports that
+    directory for every push. Its `key` for named branches is unchanged, so
+    the parity with the Claude original holds.
+  - **PR keys** are prefixed with the repository the command states:
+    `--repo`/`-R`, a `repos/<o>/<r>/` path, a PR URL, or the
+    `repository(owner:, name:)` that encloses each `pullRequest(number:)` in a
+    GraphQL query. Without one, the PR key falls back to the command's
+    directory.
+
+  The hook cannot see a command's `workdir` (probe Q7). A session that
+  switches repositories only through `workdir`, never stating `cd`, `-C`, or
+  `--repo`, therefore still shares one directory key. That is the remaining
+  collision, and it can only add or drop a redirect, never block. The replay
+  passes the real `cwd`, so it measures the best case.
+
+The three triggers below are all context-only. None denies, blocks, rewrites,
+or records a pending redirect.
+
+| # | Trigger | Event | Fires when (all conditions) | Once per |
+|---|---|---|---|---|
+| R1 | review read | PostToolUse (the redirect arrives right after the findings) | The output shows review text: a JSON response with a non-empty `body` anywhere, or non-empty output that is not JSON (for example `gh pr view --comments`). A JSON response with no `body` (a status check that happens to include `reviews`) and an empty output do not fire and consume no stamp. In the noise replay, 31 of 246 matching reads were JSON with no review text. The command segment is one of: `gh pr view [N]` with `--comments`; `gh pr view [N] --json` naming `comments`, `reviews`, or `latestReviews`; `gh api repos/<o>/<r>/pulls/<N>/(comments\|reviews)[/...]`; `gh api repos/<o>/<r>/issues/<N>/comments`; `gh api graphql` whose query names `pullRequest(number:<N>)` and `reviewThreads`, `reviews`, or `comments`; `codex-pr-status ... --pr <N>` | (PR key, push epoch) |
+| R2 | re-push | PreToolUse context (Q10: the push runs) | A push to a subject this session has already pushed at least once (round R >= 2), and no seam redirect has fired in the current epoch | (subject, push epoch) |
+| R3 | follow-up work on own work | PreToolUse context | Earliest, before any work: a branch created with an own branch as its start point (`git checkout -b <new> <own>`, `git switch -c <new> <own>`, or `git worktree add -b <new> <path> <own>`). Then at the PR: `gh pr create` with `--base`/`-B` naming an own branch (stacked on own work). A PR title and an earlier `gh pr merge` are not a trigger: chronology and a common title word do not tie a new PR to merged work, so an unstacked "Fix ..." PR gets no R3. A context-only hook cannot stop the create (Q10), so the PR-time text is written for after the PR exists | (start point or base; push epoch) |
+
+All three parse with `segments` from `lib/shell.mjs`. Quoted text, `echo` and
+`printf` arguments, heredoc bodies, and session-ledger appends are not
+commands.
+
+Parsing details (found while checking the triggers against the reproduction
+rollout):
+- **Heredocs.** Codex often runs one script that writes a ledger line through
+  `python - <<'PY' ... PY` and then runs `gh` or `git` (the 01:03Z
+  `gh pr create` is one). `segments` refuses any command containing `<<`. R1
+  and R3 therefore read `segments(withoutHeredocs(command))`. The new
+  `withoutHeredocs` in `lib/shell.mjs` removes each `<<[-]WORD` operator
+  (quoted or not), and the body from the next line through the line that is
+  exactly `WORD` (leading tabs allowed for `<<-`). This is the same rule as
+  the Claude round guard's mask (revision 17). `segments` itself is
+  unchanged, so read-path still refuses heredocs. A command that is still
+  unreadable (`$(`, backticks, variables) gets no R1 or R3.
+- **Pushes in heredocs.** `pushesIn` applies `withoutHeredocs` before
+  looking for pushes. A script that writes `git push origin x` into a
+  heredoc body (a setup script, a ledger) is not a push, so a branch's first
+  real push is never labeled push 2. This closes the gap revision 17 noted
+  ("Heredoc bodies were a case the Codex port did not need yet"). The Codex
+  and Claude counters now agree on heredocs, and the parity corpus gains a
+  heredoc case.
+- **Reads, not writes.** In the reproduction, Codex replies to review
+  threads with `gh api repos/<o>/<r>/pulls/<N>/comments/<id>/replies
+  --input <file>`. That is a write made after the fix, not a read. A
+  `gh api` call is not a review read when any of these holds:
+  - it has `--input`;
+  - it has `-X`/`--method` other than `GET`;
+  - it targets a REST path with a field flag (`-f`, `-F`, `--field`,
+    `--raw-field`), which makes gh send a POST;
+  - its path ends in `/replies`;
+  - it is a GraphQL query whose text starts with `mutation`.
+- **Several commands in one call.** When one event carries more than one
+  redirect (for example a push and a `gh pr create` in one script), the
+  texts are joined into one context output.
+
+**Redirect text.** Each redirect is a short list of actions. None contains a
+question addressed to the model, or a request to reply.
+
+R1 (review read):
+
+```
+[seam-redirect] Review feedback on PR #<N>. Before patching the line a finding points at:
+- Trace where it came from: <trace commands>. If the line came from an earlier change in this session, fix that change; do not add a check after it.
+- Find the other copies: search code, tests, and docs for the rule, constant, or field the finding names (rg -n '<name>'). If it lives in more than one place, give it one owner and make the others use it.
+- If a doc restates the contract, edit the canonical doc and link to it.
+Then make that fix.
+```
+
+`<trace commands>` is filled best-effort from the review output the hook just
+received (`tool_response`). If R1 finds `path` and `line` pairs in the shapes
+the reproduction used (the `gh api .../pulls/<N>/comments` JSON fields, and
+`path` and `line` on GraphQL `reviewThreads` comments), it lists up to 3
+concrete commands, such as `git log -L 120,120:src/x.py`. Otherwise it reads
+`git blame -L <line>,<line> <path>` for each finding. An output it cannot
+parse produces the generic form; it is not an error.
+
+Review-derived paths are untrusted (a PR can add any filename), and the model
+may run the command it is shown. So:
+- A path is always emitted single-quoted, unless it contains only
+  `[A-Za-z0-9_./@+-]`. A `'` inside it is written as `'\''`.
+- A path containing a control character or a backslash, longer than 200
+  characters, or starting with `-` is dropped. The line falls back to the
+  generic form.
+- The line number must be a positive integer.
+
+A malicious-path fixture (`;`, `$(...)`, a backtick, a newline, and a
+leading `-`) proves every case either quoted or dropped.
+
+R1 escalates by **review round**: the k-th R1 for one PR key in a session
+(at most one per epoch, so k counts the rounds in which that PR's review was
+read). From k = 2, R1 adds one line after the header: `Review round <k> on
+PR #<N>: findings that keep arriving in one class mean the rule lives in more
+than one place. Consolidate it at one owner in the next commit, instead of
+fixing the next finding by itself.` In the reproduction, every round starts
+with a review read, so R1 is what reaches the model each round; R2's
+one-per-epoch rule keeps it quiet in those rounds. A command that reads
+several PRs (a GraphQL query with several `pullRequest(number:N)`) is keyed
+by each number; the redirect names the PRs not yet stamped in the epoch.
+
+R2 (re-push of push R to `<label>`):
+- R = 2: `[seam-redirect] Push 2 to <label> is a fix round on your own change. If this fix added a case beside an existing one, move the rule to one owner in the next commit; trace it with git blame -L or git log -L first.`
+- R >= 3: `[seam-redirect] Push <R> to <label>: <R-1> fix rounds on one change. Findings that keep arriving in one class mean the rule lives in more than one place. Next commit: trace the class to the change that introduced it and consolidate it at one owner, instead of fixing the next finding by itself.`
+
+R3, at a branch started from own work (before any work exists):
+
+```
+[seam-redirect] <new> starts from this session's own unmerged work (<own>). If it fixes a defect <own> introduced, commit the fix on <own> instead of a new branch, so the fix lands where the defect came from.
+```
+
+R3, at the PR (the call runs, so the PR exists when this arrives):
+
+```
+[seam-redirect] This PR is stacked on this session's own work (<base>). If it fixes a defect <base> introduced, put the fix where the defect came from:
+- If <base> is not merged yet, move the fix onto <base> and close this PR as superseded.
+- If it merged, fix the rule at its owner and name the introducing commit in the PR body.
+```
+
+### What leaves Stop (amends section 5.3)
+
+- `round-guard` is removed from `STOP_GATES`. Its counting functions
+  (`pushesIn`, `roundVerdict`) stay: they define a push and a round, and R2
+  uses them.
+- The parity test keeps comparing subjects and counts with the Claude
+  original. It calls the counting function on the rollout's commands
+  directly, instead of through the Stop gate.
+- The `stop-round` live scenario is retired and replaced by `seam-push`
+  (below).
+- Stop keeps the evidence gate and the step-3 pending-redirect backstop,
+  unchanged.
+- `~/.codex/hooks.json` is unchanged. No entry is added, so there is no new
+  trust step. The dormant shell entries stay, because trust is keyed by
+  position (section 5.3).
+- The Claude hooks are unchanged (H6).
+- Stated tradeoff: the Stop checkpoint was the channel measured as acted on
+  11/11 (section 5.1, Q3). Context is measured as delivered and used (Q4,
+  Q10), but how often this content is acted on is not measured yet. The live
+  eval measures it and reports the rate. If the rate falls short, delivery is
+  changed in a later revision. The questionnaire and the decision menu do not
+  come back.
+
+### Invariants
+
+- **SR1 Redirect only.** A seam redirect never denies, blocks, rewrites,
+  records a pending redirect, asks for a written answer, or asks for a
+  decision. It always names the next action (H1, H2, H3).
+- **SR2 One parser per concept.** A push is whatever `pushesIn` says (with
+  heredoc bodies removed); command segments are whatever `segments` says. The seam redirect adds no
+  second push or shell parser.
+- **SR3 Rate limit.** At most one redirect per key per push epoch, as in the
+  table. The stamps live in the session state under `seam`. In practice this
+  means one redirect at the start of each fix round.
+- **SR4 No I/O on tool events.** R1-R3 read only the hook input (including
+  R1's `tool_response`) and the session state: no git, no gh, no network,
+  and no rollout read. (The reproduction's rollout is 44,983,979 bytes;
+  reading it on every tool event is not acceptable.)
+- **SR5 Fail open (H4).** A seam error produces no redirect, lets the call
+  proceed, and appends to `errors.log`.
+- **SR6 Measurable.** Every redirect is logged to `denials.jsonl` as
+  `{code: "seam-redirect", kind: "review" | "push" | "followup"}`, so step 5
+  can measure whether loops still reach 5 pushes on one subject.
+- **SR7 No shortcut menu.** No redirect offers merge, defer, or stop as an
+  option, and none asks for a reply. Mechanically: no redirect text matches
+  `\?` or the whole words `\b(answer|reply|recommend|merge|defer|stop)\b`
+  (case-insensitive). Describing a branch's state ("merged", "not merged
+  yet") is not offering a merge, and does not match.
+
+### Concurrency model
+
+- Each hook event runs one dispatcher process. Session state is one JSON
+  file, written whole by atomic rename: the last writer wins, and there is no
+  lock.
+- Whether Codex runs hook processes concurrently within one session (parallel
+  `exec_command` calls in one code-mode script) has not been probed; section
+  5.1 has no such question. If it does, a lost update can repeat a redirect
+  (a lost stamp) or miss one (a lost epoch increment). Neither can deny,
+  block, or end a turn. The existing `pending` state already has the same
+  race; it is not changed here.
+- No lock is added. A lock left behind by a killed hook (timeout) would stall
+  every later event of the session, which H4 forbids.
+- Each session has its own state file. Two sessions on one PR count their own
+  epochs.
+
+### Settling evidence for step 6
+
+- **Unit tests on both sides**, per trigger:
+  - R1 must trip on each listed command form. It must not trip on
+    `gh pr view N --json state,headRefOid`, `gh pr checks N`, `gh pr list`,
+    `echo "gh pr view 12 --comments"`, a heredoc body containing the command,
+    or a second read of the same PR in the same epoch.
+  - R1 must not trip on any write form listed under "Reads, not writes".
+  - R1 and R3 must trip on their command when it follows a heredoc in the
+    same script (the 01:03Z shape). `withoutHeredocs` has its own tests on
+    both sides: quoted and bare words, `<<-`, an unterminated body, and text
+    after the terminator.
+  - R1 must not trip on a JSON response with no `body`, or on an empty
+    output, and must trip on a later read in the same epoch that does carry
+    review text.
+  - Keys are namespaced: the same branch name pushed in two directories, the
+    same PR number in two stated repositories, and `--base feature` in
+    another directory must not affect each other. `--base main` and
+    `--base master` never count as stacked.
+  - R1 must trip again after a push, with the review-round-2 line on its
+    second firing for the same PR, and must name each unstamped PR of a
+    multi-PR query.
+  - R1 must fill concrete trace commands from both observed review-output
+    shapes, and fall back to the generic form on output it cannot parse.
+  - R2 must trip on the second push to a subject, with the R >= 3 text from
+    the third push on. It must not trip on the first push, on a first push to
+    a different subject, on `printf '... git push origin x ...' >> ledger`,
+    on a `git push` line inside a heredoc body, or when R1 already fired in
+    the epoch.
+  - R3 must trip on `--base <own branch>` for each own-branch source (the
+    `--head` of an earlier `gh pr create`; `git checkout -b`,
+    `git switch -c`, and `git worktree add -b`). It must trip at branch
+    creation from an own start point, before any PR. It must not trip on
+    `--base develop` after `git push origin develop`, on `--base main` after
+    only `git push origin HEAD` pushes, on `--base main` with a feature
+    title, or on an unstacked fix-titled create, with or without an earlier
+    `gh pr merge` in the session.
+  - The output validates against the probe-verified context shapes (Q4 for
+    PostToolUse, Q10 for PreToolUse).
+- **Redirect only.** Across the unit fixtures:
+  - no redirect text matches the SR7 patterns, for every template and
+    every escalation (R1 at k = 1 and 2, R2 at R = 2 and 3, R3 at the
+    branch and at the PR);
+  - `runStopGates` returns no round-guard finding for rollouts with 5, 10,
+    and 20 pushes to one branch;
+  - the evidence-gate tests and the parity test (now calling the counter
+    directly) pass.
+- **Incident replay.** `scripts/replay-seam-redirect.mjs <rollout>` replays
+  the rollout through `decide()` from a fresh state:
+  - each `CommandExecution` row is fed in order as a PreToolUse event, then a
+    PostToolUse event (with the row's output as `tool_response` when the row
+    carries it);
+  - each redirect is printed with its row's timestamp.
+
+  On the reproduction rollout:
+  - R3 must fire at the stacked PR create (01:03Z);
+  - R1 must fire at the first review read of PR A (01:26Z), before push 2
+    (01:29Z);
+  - R2 must not fire at push 2, because R1 already fired in that epoch;
+  - R1 with the review-round-2 line must fire at the next review read
+    (03:42Z), before push 3 (04:46Z). The old checkpoint fired after push 5
+    (06:15:13Z).
+
+  The replay also reports which redirect, if any, fired in each of PR A's
+  epochs. The rollout is private and stays
+  local: the test skips with a visible message when it is absent, as the
+  parity test does for `~/.claude/hooks`.
+- **Noise replay.** Replay the 20 most recent rollouts and report:
+  - redirects per session and per push epoch;
+  - for every historical round-guard firing, the first seam redirect on the
+    same subject and how many pushes earlier it came.
+
+  Every redirect is listed for review before merge. No rate is asserted (the
+  revision 14 practice).
+- **Grader additions** (the instruction-eval grader can check neither of
+  these today):
+  - `expected.forbiddenDenials`: codes or `code:kind` entries that must not
+    appear in the run's denial log. It fails the run, for example on
+    `round-guard` (the retired checkpoint).
+  - An optional `check.sh` per scenario, which the runner executes in the
+    fixture workspace after the run and before cleanup. Its exit status and
+    last output lines are saved beside the run's artifacts, and a nonzero
+    exit fails the run. A scenario without one is graded as before. Both
+    additions have unit tests on both sides.
+- **Live eval.** Both scenarios use a fixture repo with a local bare remote, a
+  `gh` shim, and a validation rule duplicated in two functions.
+  - `seam-review`: the shim's one review comment reports a symptom of one
+    copy. It is graded on three things: the `seam-redirect` entry being
+    logged; `check.sh` passing, which confirms the rule's literal appears in
+    exactly one source file; and no `round-guard` entry
+    (`forbiddenDenials`). The evidence gate is a separate Stop gate, so it
+    may still block a run that makes unbacked claims; that does not fail
+    this scenario.
+  - `seam-push`: the task fixes the first comment and pushes. Then a test
+    run, not a review read, reports a second failure in the same class. If
+    the second finding came from a review read, R1 would fire for it and
+    R2's one-per-epoch rule would keep R2 quiet. It is graded on three
+    things: the `seam-redirect:push` entry, `check.sh` confirming that the
+    second fix consolidated the rule, and no `round-guard` entry. It replaces
+    `stop-round` (renamed, not deleted).
+  - Each scenario's acted-on rate across runs is reported, which settles the
+    tradeoff stated above. Both scenarios map to global rule G8 (take the
+    hardened path; fix the root cause, not the symptom).
+- **Install.** `npm run guards:install`, then `npm run guards:status` passes.
+  The installer test asserts that `~/.codex/hooks.json` entries are unchanged.
+
+### Behavior change for the operator
+
+The end-of-turn questionnaire for fix loops is gone: no "root cause / churn /
+cut / decision", and no merge-or-defer menu. Instead, while it works, Codex
+gets a one-step redirect when it:
+- reads review comments;
+- re-pushes a branch it has already pushed; or
+- opens a PR that repairs its own work.
+
+The redirect says where to look (trace the finding to the change that
+introduced it), what to consolidate (one owner, one canonical doc), and then
+to make that fix. Nothing asks Codex or the operator for a decision, and
+nothing ends or holds the turn. The evidence gate at Stop is unchanged. If
+the redirects work, the global AGENTS.md prose on root-cause fixes becomes a
+step-5 trim candidate.
+
+### Open decisions (operator)
+
+- The Claude original `~/.claude/hooks/round-guard.sh` is still a Stop
+  questionnaire with the merge/defer menu. Converting it to the same
+  redirects (Claude's PostToolUse and PreToolUse) is an edit outside the lab
+  (the revision 17 precedent), so it is not part of this revision.
+- The inert shell entries in `~/.codex/hooks.json` (section 5.3) still appear
+  as the round guard in the Codex hooks UI. Relabeling or removing them
+  changes trust by position, so that decision is deferred.
 
 ## 6. Failure cases
 
@@ -516,6 +940,26 @@ turn.
   probe fail loudly. Guards pin the probed codex-cli version and warn on a
   mismatch.
 - A guard timeout counts as a guard error (H4).
+- Seam redirect (5.4):
+  - A review read that is not a recognized command gets no R1 redirect. This
+    covers a GitHub MCP tool, `curl`, review text the operator pastes, and a
+    read inside a sub-agent. R2 still fires at the re-push. MCP tool shapes
+    have not been probed, so they are excluded until they are.
+  - `gh pr view --comments` with no number is keyed `current`. Two different
+    current-branch PRs in one epoch share that key, so the second gets no
+    redirect.
+  - A new session on an existing PR starts at epoch 0. R1 fires on its first
+    review read; R2 needs two pushes in that session.
+  - A push the remote rejects still advances the epoch, which costs at most
+    one extra redirect.
+  - Missing or malformed session state is treated as empty, which costs at
+    most one repeated redirect.
+  - A review read that finds nothing new still counts as a review round, so
+    R1's escalation line can come one round early.
+  - R1's best-effort parse of review output can fill a wrong path or line if
+    a review shape changes. The redirect still names the action, and the
+    model runs the trace command itself, so a wrong guess costs one failed
+    command (which the read-path guard already handles).
 
 ## 7. Settling evidence
 
@@ -532,6 +976,11 @@ turn.
   block and passes one that should not.
 - **Step 5**: an analyzer delta per class on sessions after install, and
   AGENTS.md rules listed as relocation/removal candidates.
+- **Step 6**: each seam redirect is proven on both sides. On the
+  reproduction rollout, the first redirect fires before push 2 and the
+  escalated one before push 3. Nothing in the seam path
+  runs at Stop. The noise replay is listed for review, and the live eval
+  reports the acted-on rate.
 
 ## 8. Delivery order
 
@@ -542,3 +991,7 @@ turn.
    order.
 5. Stop-hook ports (step 4).
 6. Measurement and AGENTS.md trim candidates (step 5).
+7. Seam redirect (step 6): this revision first, stop for review. Then one
+   implementation PR: the guard, dispatcher wiring, the round guard's removal
+   from Stop, tests, the replay script, and the scenarios. Then install and
+   `guards:status`.
