@@ -195,6 +195,83 @@ fixed (contract revision 17). Afterwards, the same transcript does not block,
 test expects agreement on every case. Pointed at the original hooks, both
 parity tests fail.
 
+## Seam redirect (2026-10-04)
+
+Contract 5.4 (revision 18). Three context-only redirects (R1 review read, R2
+re-push, R3 a branch or PR stacked on own work) replace the round guard's Stop
+checkpoint. Nothing for fix loops runs at Stop.
+
+**Incident replay** (`scripts/replay-seam-redirect.mjs` on the private
+reproduction rollout; the `SEAM_INCIDENT_ROLLOUT` test checks it locally):
+
+| Time (UTC, 2026-10-03) | Event | Redirect |
+| --- | --- | --- |
+| 01:03:51 | Stacked `gh pr create` (after a python heredoc) | R3 |
+| 01:26:11 | First review read of PR A | R1 |
+| 01:29 | Push 2 | none (R1 already fired in that epoch) |
+| 03:42:25 | Next review read | R1, "Review round 2" |
+| 06:13:44 | Push 5 | the retired checkpoint fired here (06:15:13) |
+
+**Noise replay** (the 20 most recent native rollouts, real `cwd` per
+command; the per-redirect list stays local because the rollouts are private):
+
+| Pass | Commands | Pushes | Redirects (review / push / follow-up) | Checkpoints with an earlier redirect |
+| --- | --- | --- | --- | --- |
+| First implementation | 10,935 | 150 | 188 (133 / 49 / 6) | 13 of 13, each 4 pushes earlier |
+| After review fixes (namespacing, review text, ownership) | 10,990 | 151 | 193 (137 / 52 / 4) | 13 of 13, each 4 pushes earlier |
+
+The first pass was reviewed redirect by redirect. It found two problems, and
+both are fixed in the contract and the code:
+- **"Stacked on main" (4 R3s).** `main` counted as an own branch after
+  fixture-setup pushes. Ownership now comes only from created branches and PR
+  heads, and `main`/`master` are excluded.
+- **Status checks firing R1 (31 of 246 matching reads).** These reads carried
+  no review text, so the round-2 line would have claimed findings that did
+  not exist. R1 now requires review text.
+
+The second pass is the same 20 sessions, one of them still growing. Its
+counts rose slightly: namespacing separates a directory-scoped read from a
+repository-scoped read of the same PR. About 1.3 redirects per push, at most
+one per key per epoch.
+
+**Live** (`codex-cli 0.160.0`, gpt-6-sol / high, 3 runs each, lab commit
+`1251c22`, clean tree):
+
+| Scenario | Result | Logged per run | `check.sh` (one owner, tests pass) |
+| --- | --- | --- | --- |
+| seam-review | **3/3** | 1 `seam-redirect:review` | exit 0 in all 3 |
+| seam-push | **3/3** | 2 `seam-redirect:push` (pushes 2 and 3) | exit 0 in all 3 |
+
+No run logged `round-guard`. In all three seam-push runs the order was the
+same: a symptom fix and push 1, a second symptom fix and push 2 (tests
+already passing, R2 fires), then `git blame -L` on both files, then a shared
+`src/quantity.js`, then push 3. The model consolidated only after the
+redirect. There is no arm without the hook, so this shows the redirect
+arrived before the consolidation, not that it caused it.
+
+The run used the first implementation commit. Later changes added
+namespacing, review-text gating, and ownership from created branches, and
+dropped the fix-title R3 trigger. Replaying the six live rollouts through the
+final code gives the same redirects: one R1 in each seam-review run and two
+R2s in each seam-push run.
+
+After the fix-title trigger was dropped, the noise replay was re-run on the
+same 20 rollouts: its 2 fix-titled R3s are gone, the stacked and branch-time
+R3s remain, and the 18 rollouts that have not grown since give 158 redirects
+(111 / 46 / 1), down from 159.
+
+Unit: `npm run check` passes. The new tests cover:
+- R1-R3 on both sides;
+- heredoc removal, including in `pushesIn`, with a parity case against the
+  real `~/.claude/hooks/round-guard.sh`;
+- the malicious-path fixture;
+- repository namespacing;
+- the SR7 wording check;
+- Stop with 5, 10, and 20 pushes (no round finding);
+- the grader's `forbiddenDenials` and `check.sh`.
+
+The incident replay passes against the real rollout.
+
 ## Instruction retention: baseline reruns and ablation (2026-09-23)
 
 The 3 baseline cells invalidated by the usage limit were rerun on the same arm
