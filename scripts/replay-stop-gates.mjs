@@ -17,7 +17,7 @@ function argValue(argv, name, fallback) {
   return index >= 0 ? argv[index + 1] : fallback;
 }
 
-function* rolloutFiles(dir) {
+export function* rolloutFiles(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) yield* rolloutFiles(full);
@@ -38,7 +38,7 @@ export function replay(files, home = os.homedir()) {
   try {
     for (const [file, text] of files) {
       const lines = text.split("\n");
-      const state = { roundGuardFired: [] };
+      const state = {};
       lines.forEach((line, index) => {
         if (!line.includes('"task_complete"')) return;
         let row;
@@ -50,10 +50,7 @@ export function replay(files, home = os.homedir()) {
         const input = { transcript_path: prefix, stop_hook_active: false, turn_id: row.payload.turn_id ?? null, last_assistant_message: row.payload.last_agent_message ?? null };
         const { findings, errors } = runStopGates(input, state, home);
         for (const error of errors) blocks.push({ file, line: index + 1, error });
-        for (const finding of findings) {
-          if (finding.stamp) state.roundGuardFired.push(finding.stamp);
-          blocks.push({ file, line: index + 1, code: finding.code, tokens: finding.tokens ?? null, subject: finding.stamp ?? null });
-        }
+        for (const finding of findings) blocks.push({ file, line: index + 1, code: finding.code, tokens: finding.tokens ?? null });
       });
     }
   } finally { rmSync(scratch, { recursive: true, force: true }); }
@@ -74,8 +71,9 @@ export function main(argv = process.argv.slice(2)) {
   const { turns, blocks } = replay(native);
   if (argv.includes("--json")) { process.stdout.write(JSON.stringify({ rollouts: native.length, turns, blocks }, null, 2) + "\n"); return 0; }
   const count = (code) => blocks.filter((b) => b.code === code).length;
-  console.log(`rollouts ${native.length}, turns ${turns}, blocks ${blocks.length} (evidence ${count("evidence-gate")}, round ${count("round-guard")}, errors ${blocks.filter((b) => b.error).length})`);
-  for (const b of blocks) console.log(`${path.basename(b.file)}:${b.line}  ${b.error ? `ERROR ${b.error}` : `${b.code}  ${b.tokens ? b.tokens.join(" | ") : b.subject}`}`);
+  // Revision 18: the round guard left Stop; scripts/replay-seam-redirect.mjs replays its replacement.
+  console.log(`rollouts ${native.length}, turns ${turns}, blocks ${blocks.length} (evidence ${count("evidence-gate")}, errors ${blocks.filter((b) => b.error).length})`);
+  for (const b of blocks) console.log(`${path.basename(b.file)}:${b.line}  ${b.error ? `ERROR ${b.error}` : `${b.code}  ${(b.tokens ?? []).join(" | ")}`}`);
   return 0;
 }
 

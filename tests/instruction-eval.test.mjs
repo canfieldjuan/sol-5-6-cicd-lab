@@ -33,7 +33,8 @@ test("every instruction scenario grader is proven: pass*.jsonl fixtures pass, fa
       const denialsFile = path.join(dir, "fixtures", name.replace(/\.jsonl$/, ".denials.jsonl"));
       let denials = null;
       try { await readFile(denialsFile); denials = denialsFile; } catch {}
-      const result = await gradeFiles(dir, path.join(dir, "fixtures", name), log, denials);
+      const checkFile = path.join(dir, "fixtures", name.replace(/\.jsonl$/, ".check.json"));
+      const result = await gradeFiles(dir, path.join(dir, "fixtures", name), log, denials, checkFile);
       if (name.startsWith("pass")) assert.equal(result.pass, true, `${id}/${name}: ${result.failures.join("; ")}`);
       else assert.equal(result.pass, false, `${id}/${name} unexpectedly passed`);
     }

@@ -1,0 +1,1 @@
+In the repo at {{FIXTURE}}, on branch `feature` (PR #1), read the review comments with `gh pr view 1 --comments`, fix what they report, commit, and push with `git push origin feature`. Then tell me what you changed.

@@ -12,8 +12,8 @@ import { checkGhFields, satisfiesGhFields } from "./guards/gh-fields.mjs";
 import { checkRediscoveryBefore } from "./guards/rediscovery.mjs";
 import { answeredScope, checkScope, loadScope, scopeBaseline, scopeDrift } from "./guards/scope.mjs";
 import { readRollout } from "./lib/rollout.mjs";
+import { CODE as SEAM, seamAfter, seamBefore } from "./guards/seam.mjs";
 import { checkEvidence } from "./stop/evidence-gate.mjs";
-import { checkRounds } from "./stop/round-guard.mjs";
 
 export const GUARDS = [
   { code: "read-path", check: checkReadPath, after: checkReadFailure, satisfied: satisfiesReadPath, answered: answeredReadPath },
@@ -42,10 +42,12 @@ const sessionFile = (dir, sessionId) => path.join(dir, `session-${String(session
 
 // Pure decision function: returns { output, state } for one hook event.
 // Codex ports of the Stop gates (contract 5.3). Each reads the rollout at
-// transcript_path; a failing gate is skipped and reported (H4).
+// transcript_path; a failing gate is skipped and reported (H4). Revision 18
+// retired the round guard's Stop checkpoint: its push counting drives the seam
+// redirect at the push instead (guards/seam.mjs), so nothing for fix loops runs
+// at Stop.
 export const STOP_GATES = [
-  ["evidence-gate", (rollout) => checkEvidence(rollout)],
-  ["round-guard", (rollout, state, home) => checkRounds({ commands: rollout.commands, fired: state.roundGuardFired ?? [], home })]
+  ["evidence-gate", (rollout) => checkEvidence(rollout)]
 ];
 
 export function runStopGates(input, state, home, gates = STOP_GATES) {
@@ -63,6 +65,33 @@ export function runStopGates(input, state, home, gates = STOP_GATES) {
     try { const finding = gate(rollout, state, home); if (finding) findings.push(finding); } catch (error) { errors.push(`${name}: ${error.stack ?? error}`); }
   }
   return { findings, errors };
+}
+
+// Runs one seam step (contract 5.4). It applies to shell commands only, never to
+// apply_patch text, and fails open (SR5): an error leaves the call alone.
+function seamEvent(input, command, state, step) {
+  if (!command || input.tool_name === "apply_patch") return null;
+  try { return step({ command, seam: state.seam }); }
+  catch (error) { return { error: `seam: ${error.stack ?? error}` }; }
+}
+
+// Adds seam redirects to a guard result: their text joins any context output,
+// each is logged by kind, and the seam state is kept. They never ride on a deny
+// or a rewrite.
+function withSeam(result, seam, hookEventName) {
+  if (!seam) return result;
+  if (seam.error) return { ...result, errors: [...(result.errors ?? []), seam.error] };
+  const merged = { ...result, state: { ...result.state, seam: seam.seam } };
+  const hookOutput = result.output?.hookSpecificOutput;
+  if (!seam.fired.length || hookOutput?.permissionDecision) return merged;
+  const text = seam.fired.map((item) => item.reason);
+  const context = [hookOutput?.additionalContext, ...text].filter(Boolean).join("\n\n");
+  const earlier = result.redirected || result.rewritten ? [{ code: result.redirected ?? result.rewritten, kind: result.redirected ? result.redirectKind : "rewrite" }] : [];
+  return {
+    ...merged,
+    output: { hookSpecificOutput: { hookEventName, additionalContext: context } },
+    log: [...earlier, ...seam.fired.map((item) => ({ code: SEAM, kind: item.kind }))]
+  };
 }
 
 export function decide(input, state, { home = os.homedir(), guards = GUARDS, config = {}, stopGates = runStopGates } = {}) {
@@ -83,40 +112,49 @@ function decideInner(input, state, pending, { home, guards, config, stopGates })
       const guard = guards.find((candidate) => candidate.code === item.code);
       return !(guard?.satisfied && guard.satisfied(item, command));
     });
+    let result = null;
     for (const guard of guards) {
       const finding = guard.check({ toolName: input.tool_name, command, home, cwd: input.cwd, config });
       if (!finding) continue;
       if (finding.action === "context") {
         // Context-only PreToolUse output (Q10): the call runs, the hint reaches the model.
-        return { output: { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: finding.reason } }, state: { pending: remaining }, redirected: guard.code, redirectKind: finding.kind ?? "context" };
+        result = { output: { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: finding.reason } }, state: { pending: remaining }, redirected: guard.code, redirectKind: finding.kind ?? "context" };
+      } else if (finding.action === "rewrite") {
+        result = { output: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, command: finding.command } } }, state: { pending: remaining }, rewritten: guard.code };
+      } else {
+        // A denied call never runs: no push to count, no seam redirect.
+        return {
+          output: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: finding.reason } },
+          state: { pending: [...remaining, { ...finding.pending, reason: finding.reason }] },
+          denied: guard.code
+        };
       }
-      if (finding.action === "rewrite") {
-        return { output: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, command: finding.command } } }, state: { pending: remaining }, rewritten: guard.code };
-      }
-      return {
-        output: { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: finding.reason } },
-        state: { pending: [...remaining, { ...finding.pending, reason: finding.reason }] },
-        denied: guard.code
-      };
+      break;
     }
-    return { output: null, state: { pending: remaining } };
+    // Seam redirect (contract 5.4). A rewritten call still runs, so its pushes
+    // count, but no redirect rides on the rewrite output (an unprobed shape).
+    const seam = seamEvent(input, command, state, (args) => seamBefore({ ...args, cwd: input.cwd, emit: !result?.rewritten }));
+    return withSeam(result ?? { output: null, state: { pending: remaining } }, seam, "PreToolUse");
   }
 
   if (event === "PostToolUse") {
     // After-failure branches (contract revision 7): context + pending redirect.
+    let result = null;
     for (const guard of guards) {
       const finding = guard.after?.({ toolName: input.tool_name, command, response: input.tool_response, cwd: input.cwd, home, config });
       if (!finding) continue;
       // Context-only findings (guard 5) record no pending redirect.
       const duplicate = !finding.pending || pending.some((item) => item.code === finding.code && JSON.stringify(item.dir ?? item.script) === JSON.stringify(finding.pending.dir ?? finding.pending.script));
-      return {
+      result = {
         output: { hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: finding.reason } },
         state: { pending: duplicate ? pending : [...pending, { ...finding.pending, reason: finding.reason }] },
         redirected: guard.code,
         redirectKind: finding.kind ?? "after-failure"
       };
+      break;
     }
-    return { output: null, state: { pending } };
+    const seam = seamEvent(input, command, state, (args) => seamAfter({ ...args, response: input.tool_response, cwd: input.cwd }));
+    return withSeam(result ?? { output: null, state: { pending } }, seam, "PostToolUse");
   }
 
   if (event === "Stop") {
@@ -140,9 +178,7 @@ function decideInner(input, state, pending, { home, guards, config, stopGates })
         ...(drift && open.some((item) => item === drift) ? [{ code: "scope", kind: "stop-drift" }] : []),
         ...findings.map((finding) => ({ code: finding.code, kind: finding.kind }))
       ];
-      const stamps = findings.filter((finding) => finding.stamp).map((finding) => finding.stamp);
-      const fired = stamps.length ? { roundGuardFired: [...(state.roundGuardFired ?? []), ...stamps] } : {};
-      return { output: { decision: "block", reason: sections.join("\n\n---\n\n") }, state: { pending: [], ...acknowledged, ...fired }, log, errors, ...(drift && open.some((item) => item === drift) ? { redirected: "scope", redirectKind: "stop-drift" } : {}) };
+      return { output: { decision: "block", reason: sections.join("\n\n---\n\n") }, state: { pending: [], ...acknowledged }, log, errors, ...(drift && open.some((item) => item === drift) ? { redirected: "scope", redirectKind: "stop-drift" } : {}) };
     }
     return { output: null, state: { pending: [], ...acknowledged }, errors };
   }

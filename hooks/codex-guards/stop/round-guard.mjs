@@ -1,12 +1,15 @@
-import { existsSync } from "node:fs";
 import path from "node:path";
+import { withoutHeredocs } from "../lib/shell.mjs";
 
-// Round guard, Codex port (contract 5.3). The rules are a verbatim port of
-// ~/.claude/hooks/round-guard.sh: pushes per branch over the session, the most
-// recently pushed branch as subject, tiers 5/10/15/20, once per
-// (session, branch, tier), except the named divergences: HEAD and bare pushes
-// keyed by directory (revision 15), and only command-position pushes counted
-// (revision 16). Stamps live in the dispatcher's session state.
+// Round counting, from the Codex port of ~/.claude/hooks/round-guard.sh
+// (contract 5.3). `pushesIn` defines a push: a command-position `git [-C dir]
+// push` (revision 16), keyed by branch, or by directory for HEAD and bare
+// pushes (revision 15). `roundVerdict` counts pushes per subject with tiers
+// 5/10/15/20, as the original does; the parity test holds both to it.
+//
+// Revision 18 (contract 5.4) retired the Stop checkpoint this file used to
+// produce. The seam redirect (guards/seam.mjs) uses `pushesIn` at the push
+// itself, so nothing for fix loops runs at Stop.
 
 const TIERS = [5, 10, 15, 20];
 const REFSPEC = /\borigin\s+(?:HEAD:)?([\w./-]+)/;
@@ -42,7 +45,7 @@ function resolve(target, base) {
 }
 
 // A leading `cd <dir> &&` overrides the call's workdir (relative to it).
-function directoryOf(cmd, workdir) {
+export function directoryOf(cmd, workdir) {
   const cd = /^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&/.exec(cmd);
   return cd ? resolve(unquote(cd[1]), workdir) : workdir ?? null;
 }
@@ -53,8 +56,11 @@ function originalMatch(cmd, masked) {
   return again ?? masked;
 }
 
-// Every push in one command, as the subject it counts against.
-export function pushesIn({ cmd, workdir = null }) {
+// Every push in one command, as the subject it counts against. Heredoc
+// bodies are removed first (revision 18): a script that writes `git push` into
+// a heredoc is not a push, as in the Claude original's mask.
+export function pushesIn({ cmd: raw, workdir = null }) {
+  const cmd = withoutHeredocs(String(raw));
   const found = [];
   for (const masked of maskQuotes(cmd).matchAll(PUSH)) {
     // Match on the masked text; read -C and the arguments from the original.
@@ -62,12 +68,15 @@ export function pushesIn({ cmd, workdir = null }) {
     const refspec = REFSPEC.exec(match[2]);
     let branch = refspec ? refspec[1] : "<current-branch>";
     if (FLAGS.has(branch)) branch = "<current-branch>";
-    if (branch !== "HEAD" && branch !== "<current-branch>") { found.push({ key: branch, label: `\`${branch}\`` }); continue; }
-    // Revision 15: HEAD and bare pushes are keyed by directory, so pushes from
-    // different repositories are never counted as one change's rounds.
+    // The push's directory: -C, else a leading cd, else the workdir. Every push
+    // reports it (revision 18, for repository namespacing); only HEAD and bare
+    // pushes are keyed by it, so named keys stay as the Claude original has them.
     const base = directoryOf(cmd, workdir);
     const dir = match[1] ? resolve(unquote(match[1]), base) : base;
-    found.push(dir ? { key: `${branch}@${dir}`, label: `the current branch in ${dir}` } : { key: branch, label: `\`${branch}\`` });
+    if (branch !== "HEAD" && branch !== "<current-branch>") { found.push({ key: branch, label: `\`${branch}\``, named: true, dir }); continue; }
+    // Revision 15: HEAD and bare pushes are keyed by directory, so pushes from
+    // different repositories are never counted as one change's rounds.
+    found.push(dir ? { key: `${branch}@${dir}`, label: `the current branch in ${dir}`, named: false, dir } : { key: branch, label: `\`${branch}\``, named: false, dir });
   }
   return found;
 }
@@ -84,15 +93,4 @@ export function roundVerdict(commands, fired = []) {
   const stamp = `${subject.key}:${tier}`;
   if (fired.includes(stamp)) return null;
   return { branch: subject.key, label: subject.label, count, tier, stamp };
-}
-
-export function roundReason({ label, count }, home) {
-  const contract = path.join(home, ".codex", "hooks", "CONTRACT.md");
-  const pointer = existsSync(contract) ? ` See ${contract}, which is exactly this diagnosis for the git guard.` : "";
-  return `[round-guard] ${count} pushes to ${label} in this session. That is ${count} review rounds on one change.\n\nThis is the ATLAS #2361 pattern: nine rounds and ~18 hours on a read-only PR, where three of the last five rounds fixed defects introduced while fixing the previous round. The operator had to notice.\n\nBefore pushing again, answer these IN YOUR REPLY, briefly, not as a document:\n\n  1. ROOT CAUSE. Do the recent findings share a class? Name it. If each round finds "another construct" of the same kind, the enforcement point is in the wrong place and more rounds will not converge.${pointer}\n\n  2. YOUR OWN CHURN. How many of the last rounds fixed something YOU introduced in the previous round? Say the number. That share is not review thoroughness; it is rework.\n\n  3. THE CUT. What would stopping look like? Name the smallest thing that is genuinely blocking (runtime behaviour, money, auth, data loss) versus what is bookkeeping (plan docs, contract tables, comment wording). Bookkeeping is not a reason to continue a loop.\n\n  4. THE DECISION. Recommend one: merge now on green, defer the rest to a follow-up issue, or continue, and say why. Give the operator the call rather than starting the next round by default.\n\nIf you have already done this in this turn, say so and continue.`;
-}
-
-export function checkRounds({ commands, fired, home }) {
-  const verdict = roundVerdict(commands, fired);
-  return verdict ? { code: "round-guard", kind: "stop-round", reason: roundReason(verdict, home), stamp: verdict.stamp } : null;
 }

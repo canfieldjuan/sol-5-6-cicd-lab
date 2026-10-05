@@ -41,6 +41,56 @@ export function segments(command) {
   return result;
 }
 
+// Removes heredocs so the shell around them can be read (contract 5.4,
+// revision 18): each `<<WORD` / `<<-WORD` operator (word bare or quoted) and its
+// body, from the next line through the line that is exactly WORD (leading tabs
+// allowed for `<<-`). An unterminated body runs to the end. Quoted text is
+// masked first, so a `<<` inside quotes is not an operator; `<<<` is a
+// here-string, not a heredoc. `segments` itself still refuses heredocs.
+const HEREDOC = /(?<!<)<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2(?!<)/g;
+
+function maskQuotes(line) {
+  let out = "";
+  let quote = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote) {
+      if (quote === '"' && ch === "\\" && i + 1 < line.length) { out += "__"; i += 1; continue; }
+      if (ch === quote) quote = null;
+      out += ch === quote || quote === null ? ch : "_";
+    } else {
+      if (ch === "'" || ch === '"') quote = ch;
+      out += ch;
+    }
+  }
+  return out;
+}
+
+export function withoutHeredocs(command) {
+  const out = [];
+  const bodies = [];
+  for (const line of String(command).split("\n")) {
+    if (bodies.length) {
+      const { word, tabs } = bodies[0];
+      if ((tabs ? line.replace(/^\t+/, "") : line) === word) bodies.shift();
+      continue;
+    }
+    const masked = maskQuotes(line);
+    let kept = "";
+    let from = 0;
+    for (const match of masked.matchAll(HEREDOC)) {
+      // The word may be quoted, so read it from the original line.
+      const original = line.slice(match.index, match.index + match[0].length);
+      const word = /([A-Za-z_][A-Za-z0-9_]*)['"]?$/.exec(original)[1];
+      bodies.push({ word, tabs: match[1] === "-" });
+      kept += line.slice(from, match.index);
+      from = match.index + match[0].length;
+    }
+    out.push(kept + line.slice(from));
+  }
+  return out.join("\n");
+}
+
 // Resolves a path argument against a known base. Returns null when the base
 // is unknown for a relative path, or the argument is not a literal path.
 export function resolvePath(arg, base, home) {

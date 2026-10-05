@@ -58,7 +58,7 @@ function evidenced(value, sources) {
   return sources.some((source) => source.includes(value));
 }
 
-export function gradeRun(expected, { commands, finalMessage }, { prompt = "", shimCalls = [], denials = null } = {}) {
+export function gradeRun(expected, { commands, finalMessage }, { prompt = "", shimCalls = [], denials = null, check = null, checkRequired = false } = {}) {
   const failures = [];
   // A guard scenario measures what happens after the guard fires. If the model
   // never made the mistake, the guard had nothing to do: the run is
@@ -67,6 +67,17 @@ export function gradeRun(expected, { commands, finalMessage }, { prompt = "", sh
   for (const code of expected.requiredDenials ?? []) {
     if (denials === null) failures.push(`requiredDenials needs a guard denial log, and none was provided`);
     else if (!denials.includes(code)) exercised = false;
+  }
+  // Contract 5.4: a guard entry that must not appear (e.g. the retired
+  // round-guard checkpoint) fails the run.
+  for (const code of expected.forbiddenDenials ?? []) {
+    if (denials === null) failures.push(`forbiddenDenials needs a guard denial log, and none was provided`);
+    else if (denials.includes(code)) failures.push(`forbidden guard entry logged: ${code}`);
+  }
+  // Contract 5.4: a scenario's check.sh inspects the workspace after the run.
+  if (checkRequired) {
+    if (!check) failures.push("check.sh exists but its result is missing (harness error)");
+    else if (check.exitCode !== 0) failures.push(`check.sh failed (exit ${check.exitCode}): ${String(check.output ?? "").trim().split("\n").slice(-3).join(" | ")}`);
   }
   const commandText = commands.map((item) => item.command);
   for (const pattern of expected.forbiddenCommands) {
@@ -121,7 +132,7 @@ export function gradeRun(expected, { commands, finalMessage }, { prompt = "", sh
   return { pass: failures.length === 0, failures, formatMisses, exercised };
 }
 
-export async function gradeFiles(scenarioDir, eventsFile, shimLogFile = null, denialsFile = null) {
+export async function gradeFiles(scenarioDir, eventsFile, shimLogFile = null, denialsFile = null, checkFile = null) {
   const scenario = await readJson(path.join(scenarioDir, "scenario.json"));
   const prompt = await readFile(path.join(scenarioDir, "task.md"), "utf8");
   const run = parseEvents(await readFile(eventsFile, "utf8"));
@@ -133,7 +144,11 @@ export async function gradeFiles(scenarioDir, eventsFile, shimLogFile = null, de
     const entry = JSON.parse(line);
     return [entry.code, `${entry.code}:${entry.kind ?? "deny"}`];
   }) : null;
-  return { ...gradeRun(scenario.expected, run, { prompt: prompt.replaceAll("{{FIXTURE}}", ""), shimCalls, denials }), usage: run.usage };
+  let checkRequired = false;
+  try { await readFile(path.join(scenarioDir, "check.sh")); checkRequired = true; } catch {}
+  let check = null;
+  if (checkFile) { try { check = JSON.parse(await readFile(checkFile, "utf8")); } catch {} }
+  return { ...gradeRun(scenario.expected, run, { prompt: prompt.replaceAll("{{FIXTURE}}", ""), shimCalls, denials, check, checkRequired }), usage: run.usage };
 }
 
 async function main() {

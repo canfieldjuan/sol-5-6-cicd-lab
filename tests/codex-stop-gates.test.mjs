@@ -92,7 +92,7 @@ test("round guard (revision 15): HEAD and bare pushes are keyed by workdir or a 
   assert.equal(roundVerdict(Array.from({ length: 5 }, () => at("git push", null))).branch, "<current-branch>", "no directory known: the original bucket");
 });
 
-test("dispatcher: gates join pending redirects in one block, once per Stop; the round stamp persists", async () => {
+test("dispatcher: gates join pending redirects in one block, once per Stop; 5 pushes add no round checkpoint (revision 18)", async () => {
   const pushes = Array.from({ length: 5 }, (_, i) => R.exec([{ cmd: "git push origin fix", workdir: "/r" }], `p${i}`));
   const r = await rollout([R.turn("t"), ...pushes, R.say("Pushed fix; CI shows 41 passed.")]);
   try {
@@ -100,12 +100,10 @@ test("dispatcher: gates join pending redirects in one block, once per Stop; the 
     const input = { hook_event_name: "Stop", transcript_path: r.file, stop_hook_active: false, last_assistant_message: "Pushed fix; CI shows 41 passed." };
     const first = decide(input, { pending });
     assert.equal(first.output.decision, "block");
-    for (const part of ["[read-path] pending", "[evidence-gate]", "41 passed", "[round-guard] 5 pushes to `fix`"]) assert.ok(first.output.reason.includes(part), part);
-    assert.deepEqual(first.log.map((e) => e.kind), ["stop-evidence", "stop-round"]);
-    assert.deepEqual(first.state.roundGuardFired, ["fix:5"]);
+    for (const part of ["[read-path] pending", "[evidence-gate]", "41 passed"]) assert.ok(first.output.reason.includes(part), part);
+    assert.ok(!first.output.reason.includes("[round-guard]"), "the round checkpoint is retired");
+    assert.deepEqual(first.log.map((e) => e.kind), ["stop-evidence"]);
     assert.equal(decide({ ...input, stop_hook_active: true }, first.state).output, null, "never blocks twice");
-    const next = decide(input, first.state);
-    assert.ok(!next.output.reason.includes("[round-guard]"), "the tier does not fire again");
   } finally { await rm(r.dir, { recursive: true, force: true }); }
 });
 
@@ -163,9 +161,9 @@ test("rounds (revision 16): pushes run from a loop are counted from the executed
   const executed = ["a", "b", "c", "d", "e"].flatMap((f) => [R.ran(`git add ${f}.txt`), R.ran(`git commit -m "Fix ${f}"`), R.ran("git push origin feature")]);
   const r = await rollout([R.turn("t"), ...perFile, ...executed, R.say("Done.")]);
   try {
-    const finding = runStopGates({ transcript_path: r.file, stop_hook_active: false }, {}, "/h").findings.find((f) => f.code === "round-guard");
-    assert.ok(finding, "5 executed pushes to one branch must reach the tier");
-    assert.match(finding.reason, /5 pushes to `feature`/);
+    const verdict = roundVerdict(readRollout(r.file).commands);
+    assert.ok(verdict, "5 executed pushes to one branch must reach the tier");
+    assert.deepEqual([verdict.branch, verdict.count], ["feature", 5]);
   } finally { await rm(r.dir, { recursive: true, force: true }); }
 });
 
@@ -174,7 +172,7 @@ test("rounds (revision 16): text that mentions git push is not a push; only a co
   const rows = ["a", "b", "c", "d"].flatMap((f) => [R.ran("git push origin feature"), ledger(f)]);
   const r = await rollout([R.turn("t"), ...rows, R.ran('echo "next: git push origin feature"'), R.ran("git log --grep='git push'")]);
   try {
-    assert.equal(runStopGates({ transcript_path: r.file, stop_hook_active: false }, {}, "/h").findings.length, 0, "4 real pushes; the ledger, echo, and grep text are not pushes");
+    assert.equal(roundVerdict(readRollout(r.file).commands), null, "4 real pushes; the ledger, echo, and grep text are not pushes");
   } finally { await rm(r.dir, { recursive: true, force: true }); }
   assert.equal(roundVerdict(Array.from({ length: 5 }, () => ({ cmd: "cd /r/x && GIT_TRACE=0 git push origin feature", workdir: null }))).branch, "feature", "after && and a VAR= prefix");
   assert.equal(roundVerdict(Array.from({ length: 5 }, () => ({ cmd: "git -C /r/y push", workdir: "/elsewhere" }))).branch, "<current-branch>@/r/y", "-C sets the directory");
@@ -187,8 +185,8 @@ test("rounds (revision 16): executed rows replace source literals, never add to 
   const both = await rollout([R.turn("t"), ...Array.from({ length: 3 }, (_, i) => R.exec([{ cmd: "git push origin feature", workdir: "/lit" }], `p${i}`)), ...Array.from({ length: 5 }, () => R.ran("git push origin feature", "/r"))]);
   const literalsOnly = await rollout([R.turn("t"), ...Array.from({ length: 5 }, (_, i) => R.exec([{ cmd: "git push origin feature", workdir: "/r" }], `p${i}`))]);
   try {
-    assert.match(runStopGates({ transcript_path: both.file, stop_hook_active: false }, {}, "/h").findings[0].reason, /5 pushes/, "the 5 executed, not the 3 literals and not 8");
-    assert.match(runStopGates({ transcript_path: literalsOnly.file, stop_hook_active: false }, {}, "/h").findings[0].reason, /5 pushes/, "older rollouts still counted");
+    assert.equal(roundVerdict(readRollout(both.file).commands).count, 5, "the 5 executed, not the 3 literals and not 8");
+    assert.equal(roundVerdict(readRollout(literalsOnly.file).commands).count, 5, "older rollouts still counted");
     const read = readRollout(both.file);
     assert.deepEqual(read.commands[0], { cmd: "git push origin feature", workdir: "/r" }, "argv script and file:// cwd decoded");
   } finally { await rm(both.dir, { recursive: true, force: true }); await rm(literalsOnly.dir, { recursive: true, force: true }); }

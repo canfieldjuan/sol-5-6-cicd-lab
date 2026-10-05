@@ -1,0 +1,1 @@
+In the repo at {{FIXTURE}}, on branch `feature`: `validateReturn` in src/returns.js accepts a quantity of 0, which must be rejected. Fix it, commit, and push with `git push origin feature`. Then run `./test.sh`. If it reports a failure, fix that, commit, and push again; repeat until it passes. Then tell me it is done.
