@@ -634,7 +634,7 @@ or records a pending redirect.
 |---|---|---|---|---|
 | R1 | review read | PostToolUse (the redirect arrives right after the findings) | The output shows review text: a JSON response with a non-empty `body` anywhere, or non-empty output that is not JSON (for example `gh pr view --comments`). A JSON response with no `body` (a status check that happens to include `reviews`) and an empty output do not fire and consume no stamp. In the noise replay, 31 of 246 matching reads were JSON with no review text. The command segment is one of: `gh pr view [N]` with `--comments`; `gh pr view [N] --json` naming `comments`, `reviews`, or `latestReviews`; `gh api repos/<o>/<r>/pulls/<N>/(comments\|reviews)[/...]`; `gh api repos/<o>/<r>/issues/<N>/comments`; `gh api graphql` whose query names `pullRequest(number:<N>)` and `reviewThreads`, `reviews`, or `comments`; `codex-pr-status ... --pr <N>` | (PR key, push epoch) |
 | R2 | re-push | PreToolUse context (Q10: the push runs) | A push to a subject this session has already pushed at least once (round R >= 2), and no seam redirect has fired in the current epoch | (subject, push epoch) |
-| R3 | follow-up work on own work | PreToolUse context | Earliest, before any work: a branch created with an own branch as its start point (`git checkout -b <new> <own>`, `git switch -c <new> <own>`, or `git worktree add -b <new> <path> <own>`). Then at the PR: `gh pr create` with `--base`/`-B` naming an own branch (stacked on own work), or `gh pr create` whose `--title`/`-t` matches `\b(fix(es\|ed)?\|follow[- ]?up\|regression\|revert\|repair\|restore\|correct)\b` (case-insensitive) after this session ran `gh pr merge`. A context-only hook cannot stop the create (Q10), so the PR-time text is written for after the PR exists | (start point, base, or title; push epoch) |
+| R3 | follow-up work on own work | PreToolUse context | Earliest, before any work: a branch created with an own branch as its start point (`git checkout -b <new> <own>`, `git switch -c <new> <own>`, or `git worktree add -b <new> <path> <own>`). Then at the PR: `gh pr create` with `--base`/`-B` naming an own branch (stacked on own work). A PR title and an earlier `gh pr merge` are not a trigger: chronology and a common title word do not tie a new PR to merged work, so an unstacked "Fix ..." PR gets no R3. A context-only hook cannot stop the create (Q10), so the PR-time text is written for after the PR exists | (start point or base; push epoch) |
 
 All three parse with `segments` from `lib/shell.mjs`. Quoted text, `echo` and
 `printf` arguments, heredoc bodies, and session-ledger appends are not
@@ -730,7 +730,7 @@ R3, at a branch started from own work (before any work exists):
 R3, at the PR (the call runs, so the PR exists when this arrives):
 
 ```
-[seam-redirect] This PR repairs this session's own work (<stacked on <base> | a fix after this session merged a PR>). Put the fix where the defect came from:
+[seam-redirect] This PR is stacked on this session's own work (<base>). If it fixes a defect <base> introduced, put the fix where the defect came from:
 - If <base> is not merged yet, move the fix onto <base> and close this PR as superseded.
 - If it merged, fix the rule at its owner and name the introducing commit in the PR body.
 ```
@@ -831,18 +831,18 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
     the epoch.
   - R3 must trip on `--base <own branch>` for each own-branch source (the
     `--head` of an earlier `gh pr create`; `git checkout -b`,
-    `git switch -c`, and `git worktree add -b`), and on a fix-titled create
-    after `gh pr merge`. It must trip at branch creation from an own start
-    point, before any PR. It must not trip on `--base develop` after
-    `git push origin develop`, on `--base main` after only
-    `git push origin HEAD` pushes, on `--base main` with a feature title, or
-    on a fix-titled create with no earlier merge in the session.
+    `git switch -c`, and `git worktree add -b`). It must trip at branch
+    creation from an own start point, before any PR. It must not trip on
+    `--base develop` after `git push origin develop`, on `--base main` after
+    only `git push origin HEAD` pushes, on `--base main` with a feature
+    title, or on an unstacked fix-titled create, with or without an earlier
+    `gh pr merge` in the session.
   - The output validates against the probe-verified context shapes (Q4 for
     PostToolUse, Q10 for PreToolUse).
 - **Redirect only.** Across the unit fixtures:
   - no redirect text matches the SR7 patterns, for every template and
-    every escalation (R1 at k = 1 and 2, R2 at R = 2 and 3, R3 both
-    branches);
+    every escalation (R1 at k = 1 and 2, R2 at R = 2 and 3, R3 at the
+    branch and at the PR);
   - `runStopGates` returns no round-guard finding for rollouts with 5, 10,
     and 20 pushes to one branch;
   - the evidence-gate tests and the parity test (now calling the counter
