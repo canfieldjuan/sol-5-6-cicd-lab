@@ -1,6 +1,6 @@
 # Instruction Retention Contract
 
-Status: ACCEPTED (PR #6), revision 6. No implementation starts until the operator
+Status: ACCEPTED (PR #6), revision 7. No implementation starts until the operator
 accepts this contract (contract-first rule). If implementation exposes a missing
 decision, this file is revised and recommitted before that behavior is coded.
 
@@ -94,7 +94,10 @@ Structural invariants (deterministic, required checks):
   flag. The only file it writes under `~/.codex/` is `AGENTS.md`. Its state
   (last installed hash), timestamped backups, lock, and temp file live under
   `~/.local/state/sol-lab/`. The new file is renamed into place atomically, and
-  the target hash is re-checked immediately before the rename.
+  the target hash is re-checked immediately before the rename. The replacement
+  keeps the target's permission bits; a new target gets `0644` (revision 7: a
+  temp file renamed into place otherwise takes the process umask, so a `0600`
+  file would become readable by other users).
 
 Check modes (revision 2). S2, S3, and S5 describe the candidate. On the
 unchanged baseline they fail by construction, since the truncation they detect

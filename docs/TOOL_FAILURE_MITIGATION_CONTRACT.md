@@ -1004,6 +1004,11 @@ redirects, and remove the round-guard Stop hooks on both sides.
   `settings.json`, after backing the file up, and never edits, reorders, or
   removes another entry. `npm run guards:status -- --claude` reports active
   once a Claude session has run the hook after the install.
+  Every file the installer replaces keeps its permission bits, for both
+  targets. Before this rule, the temp file took the process umask, so the
+  revision 20 install turned a `0600` `settings.json` into `0664`, and the
+  2026-09-23 Codex install turned `hooks.json` from `0644` into `0664`. Both
+  modes were restored by hand.
 - **H6 amended.** The Codex install still never touches Claude Code. The
   `--claude` target is a separate, operator-directed install that adds only
   its own entries.
