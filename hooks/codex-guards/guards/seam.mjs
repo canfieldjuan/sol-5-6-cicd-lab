@@ -11,9 +11,10 @@ import { directoryOf, pushesIn } from "../stop/round-guard.mjs";
 //
 // R1 review read (PostToolUse), R2 re-push of an own branch (PreToolUse), R3
 // a branch or PR stacked on own work (PreToolUse). At most one redirect per key
-// per push epoch (SR3); R2 also stays quiet when any redirect already fired in
-// the epoch. Epochs are per directory scope (revision 19), so a push in one
-// repository does not start a new round for another.
+// per push epoch (SR3). R2 fires at every re-push, after an R1 too (revision
+// 21): R1 comes before the fix exists, R2 checks what the push sends. Epochs
+// are per directory scope (revision 19), so a push in one repository does not
+// start a new round for another.
 
 export const CODE = "seam-redirect";
 
@@ -39,7 +40,7 @@ const branchKey = (dir, name) => `${scopeOf(dir)}|${name}`;
 const repoScope = (owner, name) => `${owner}/${name}`.toLowerCase();
 
 export function emptySeam() {
-  return { epochs: {}, pushes: {}, own: [], rounds: {}, stamps: {}, lastFired: {} };
+  return { epochs: {}, pushes: {}, own: [], rounds: {}, stamps: {}, escalated: {} };
 }
 
 function commandWords(command) {
@@ -254,9 +255,18 @@ export function reviewText(labels, round, roundLabel, locations) {
   return lines.join("\n");
 }
 
-export function pushText(round, label) {
-  if (round === 2) return `[seam-redirect] Push 2 to ${label} is a fix round on your own change. If this fix added a case beside an existing one, move the rule to one owner in the next commit; trace it with git blame -L or git log -L first.`;
-  return `[seam-redirect] Push ${round} to ${label}: ${round - 1} fix rounds on one change. Findings that keep arriving in one class mean the rule lives in more than one place. Next commit: trace the class to the change that introduced it and consolidate it at one owner, instead of fixing the next finding by itself.`;
+export const PUSH_ESCALATION = "- Findings that keep arriving in one class mean the rule lives in more than one place: trace the class to the change that introduced it (git log -L) and consolidate it at one owner, instead of fixing the next finding by itself.";
+
+// R2 checks what the push sends (revision 21). escalate: add the escalation
+// line, which the caller leaves out when R1's review-round line carried it in
+// this epoch, so one redirect per round owns it.
+export function pushText(round, label, escalate = false) {
+  const lines = [
+    `[seam-redirect] Push ${round} to ${label} sends fix round ${round - 1} on your own change. Read the diff it sends before the next review does:`,
+    "- If the fix restates a rule in a second place, or adds a case beside an existing one, move the rule to one owner in the next commit (rg -n '<name>' finds the copies)."
+  ];
+  if (escalate) lines.push(PUSH_ESCALATION);
+  return lines.join("\n");
 }
 
 // R3 at a branch started from own work: before any work exists.
@@ -275,14 +285,20 @@ export function followupText(base) {
   ].join("\n");
 }
 
-const clone = (seam) => ({ ...emptySeam(), ...(seam ?? {}), epochs: { ...(seam?.epochs ?? {}) }, pushes: { ...(seam?.pushes ?? {}) }, own: [...(seam?.own ?? [])], rounds: { ...(seam?.rounds ?? {}) }, stamps: { ...(seam?.stamps ?? {}) }, lastFired: { ...(seam?.lastFired ?? {}) } });
+// A revision 20 state's `lastFired` is dropped: nothing reads it since R2 no
+// longer waits on other redirects (revision 21).
+const clone = (seam) => {
+  const { lastFired, ...rest } = seam ?? {};
+  return { ...emptySeam(), ...rest, epochs: { ...(seam?.epochs ?? {}) }, pushes: { ...(seam?.pushes ?? {}) }, own: [...(seam?.own ?? [])], rounds: { ...(seam?.rounds ?? {}) }, stamps: { ...(seam?.stamps ?? {}) }, escalated: { ...(seam?.escalated ?? {}) } };
+};
 
 // The current epoch of a directory scope, and the stamp value for it: a stamp
 // records its scope, so one key read from two scopes never shares an epoch.
 const epochOf = (seam, dir) => seam.epochs[scopeOf(dir)] ?? 0;
 const markOf = (seam, dir) => `${scopeOf(dir)}@${epochOf(seam, dir)}`;
-const firedIn = (seam, dir) => seam.lastFired[scopeOf(dir)] === epochOf(seam, dir);
-const stampFired = (seam, dir, stamp) => { seam.stamps[stamp] = markOf(seam, dir); seam.lastFired[scopeOf(dir)] = epochOf(seam, dir); };
+const stampFired = (seam, dir, stamp) => { seam.stamps[stamp] = markOf(seam, dir); };
+// `escalated[scope]` is the epoch in which R1 last sent its review-round line.
+const escalatedIn = (seam, dir) => seam.escalated[scopeOf(dir)] === epochOf(seam, dir);
 
 // PreToolUse: R2 and R3, and the push epoch. With emit false (the call was
 // rewritten by another guard), counters move but nothing fires or is stamped.
@@ -297,8 +313,8 @@ export function seamBefore({ command, cwd = null, seam, emit = true }) {
     const subject = push.named ? branchKey(push.dir, push.key) : push.key;
     const round = (next.pushes[subject] ?? 0) + 1;
     const stamp = `push:${subject}`;
-    if (emit && round >= 2 && !firedIn(next, push.dir) && next.stamps[stamp] !== markOf(next, push.dir)) {
-      fired.push({ kind: "push", reason: pushText(round, push.label) });
+    if (emit && round >= 2 && next.stamps[stamp] !== markOf(next, push.dir)) {
+      fired.push({ kind: "push", reason: pushText(round, push.label, round >= 3 && !escalatedIn(next, push.dir)) });
       stampFired(next, push.dir, stamp);
     }
     next.pushes[subject] = round;
@@ -347,6 +363,8 @@ export function seamAfter({ command, response, cwd = null, seam }) {
       if (next.rounds[ref.key] > round) { round = next.rounds[ref.key]; roundLabel = ref.label; }
     }
     fired.push({ kind: "review", reason: reviewText(fresh.map((ref) => ref.label), round, roundLabel, findingLocations(response)) });
+    // reviewText adds its review-round line from round 2; R2 then leaves its own out.
+    if (round >= 2) next.escalated[scopeOf(dir)] = epochOf(next, dir);
   }
   return { fired, seam: next };
 }

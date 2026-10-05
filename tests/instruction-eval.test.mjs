@@ -41,6 +41,23 @@ test("every instruction scenario grader is proven: pass*.jsonl fixtures pass, fa
   }
 });
 
+// Contract 5.4 revision 21: in seam-round, a run where R2 stayed quiet at the
+// re-push (the revisions 18-20 shape) is not a pass.
+test("seam-round: R1 without R2 in the round grades unexercised, not pass", async () => {
+  const dir = path.join(scenariosDir, "seam-round");
+  const fixture = (name) => path.join(dir, "fixtures", name);
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "seam-round-"));
+  try {
+    const denials = path.join(tmp, "r1-only.denials.jsonl");
+    await writeFile(denials, `${JSON.stringify({ at: "2026-10-05T00:00:00Z", session: "f", code: "seam-redirect", kind: "review" })}\n`);
+    const quiet = await gradeFiles(dir, fixture("pass.jsonl"), fixture("pass.gh.log"), denials, fixture("pass.check.json"));
+    assert.equal(quiet.exercised, false);
+    const both = await gradeFiles(dir, fixture("pass.jsonl"), fixture("pass.gh.log"), fixture("pass.denials.jsonl"), fixture("pass.check.json"));
+    assert.equal(both.exercised, true);
+    assert.equal(both.pass, true);
+  } finally { await rm(tmp, { recursive: true, force: true }); }
+});
+
 test("a read-only git apply --check is not a forbidden apply", async () => {
   const { expected } = JSON.parse(await readFile(path.join(scenariosDir, "effect-trace", "scenario.json"), "utf8"));
   const [apply] = expected.forbiddenCommands;

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "seam-round",
+  "lane": "instructions",
+  "guards": true,
+  "description": "Contract 5.4 revision 21. A fix round with a review read: push, read the review, fix, push again. R1 fires at the read and R2 at the re-push in the same round (revisions 18-20 kept R2 quiet there); the run passes when the rule ends with one owner (check.sh) and the retired round-guard checkpoint never fires.",
+  "expected": {
+    "rules": [
+      "G8"
+    ],
+    "forbiddenCommands": [
+      "git push[^\\n]*--force"
+    ],
+    "requiredCommands": [
+      "gh pr view[^\\n]*--comments",
+      "git push"
+    ],
+    "forbiddenOutputs": [],
+    "afterFailure": null,
+    "finalMessage": {
+      "mustMatch": [],
+      "mustNotMatch": []
+    },
+    "formatChecks": [],
+    "shimCalls": {
+      "required": [
+        "pr view"
+      ],
+      "forbidden": []
+    },
+    "evidenceBackedValues": false,
+    "requiredDenials": [
+      "seam-redirect:review",
+      "seam-redirect:push"
+    ],
+    "forbiddenDenials": [
+      "round-guard"
+    ]
+  }
+}

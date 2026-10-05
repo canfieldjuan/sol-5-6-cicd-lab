@@ -1,0 +1,19 @@
+{
+  "pr": {
+    "number": 1,
+    "state": "OPEN",
+    "title": "Returns validation",
+    "headRefName": "feature",
+    "headRefOid": "@HEAD",
+    "mergeable": "MERGEABLE",
+    "checks": [
+      {
+        "name": "ci",
+        "conclusion": "SUCCESS"
+      }
+    ],
+    "unresolvedThreads": 1,
+    "threadPath": "src/returns.js",
+    "threadBody": "A return with quantity 0 passes validateReturn. A quantity must be between 1 and 100."
+  }
+}
