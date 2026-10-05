@@ -807,18 +807,28 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
 ### Concurrency model
 
 - Each hook event runs one dispatcher process. Session state is one JSON
-  file, written whole by atomic rename: the last writer wins, and there is no
-  lock.
-- Whether Codex runs hook processes concurrently within one session (parallel
+  file, written whole by atomic rename.
+- Claude Code runs the hooks of parallel tool calls concurrently (hooks
+  reference, PostToolBatch). Whether Codex does within one session (parallel
   `exec_command` calls in one code-mode script) has not been probed; section
-  5.1 has no such question. If it does, a lost update can repeat a redirect
-  (a lost stamp) or miss one (a lost epoch increment). Neither can deny,
-  block, or end a turn. The existing `pending` state already has the same
-  race; it is not changed here.
-- No lock is added. A lock left behind by a killed hook (timeout) would stall
-  every later event of the session, which H4 forbids.
-- Each session has its own state file. Two sessions on one PR count their own
-  epochs.
+  5.1 has no such question. Without a lock, two processes read the same state
+  and the second write erases the first's update: a lost stamp repeats a
+  redirect, and a lost epoch increment or push count misses one. The
+  `pending` state has the same race.
+- **Session lock (revision 20).** Both entry points (`guard.mjs` and
+  `claude-seam.mjs`) serialize each session's read, decide, and write with
+  one shared helper: an exclusive lock file beside the state file,
+  `session-<id>.json.lock`. Revision 18 added no lock, because a lock left by
+  a killed hook would stall every later event (H4). The lock is bounded
+  instead:
+  - A waiter retries for up to 2 s. When the wait runs out, the event is
+    skipped: no output, no state change, and a line in `errors.log` (SR5).
+  - A lock older than 10 s, the hook timeout, was left by a killed hook. The
+    next waiter removes it and takes the lock.
+  - Two waiters that find the same stale lock at the same moment can both
+    proceed once. That needs a killed hook and a race together.
+- Each session has its own state file and lock. Two sessions on one PR count
+  their own epochs.
 
 ### Settling evidence for step 6
 
@@ -985,6 +995,9 @@ redirects, and remove the round-guard Stop hooks on both sides.
   with the Codex state.
 - **Fail open (SR5).** Any error exits 0 with no output and appends to
   `errors.log`.
+- **Concurrency.** Claude runs the hooks of parallel tool calls
+  concurrently, so the adapter takes the session lock described under
+  "Concurrency model" above, the same helper the Codex dispatcher uses.
 - **Installer.** `npm run guards:install -- --claude [--apply]` copies the
   same guard tree to `~/.claude/hooks/lab-guards/` under its own manifest
   (`claude-seam-install.json`). It appends only its two entries to
@@ -1019,6 +1032,9 @@ Settling evidence for revision 20:
   - A non-Bash tool and a Stop event give no output.
   - `main` persists the session state and logs each redirect, and it fails
     open on malformed input.
+  - Concurrent hook processes on one session lose no update: parallel pushes
+    to distinct branches all count. A lock held past the wait skips the event
+    and logs it; a lock older than the hook timeout is removed.
 - **Installer.** The Claude target appends exactly two `Bash` entries, keeps
   every other key and entry in order, is idempotent, and backs up
   `settings.json`.
