@@ -208,7 +208,7 @@ reproduction rollout; the `SEAM_INCIDENT_ROLLOUT` test checks it locally):
 | --- | --- | --- |
 | 01:03:51 | Stacked `gh pr create` (after a python heredoc) | R3 |
 | 01:26:11 | First review read of PR A | R1 |
-| 01:29 | Push 2 | none (R1 already fired in that epoch) |
+| 01:29 | Push 2 | none (R1 already fired in that epoch; revision 21 fires R2 here, see below) |
 | 03:42:25 | Next review read | R1, "Review round 2" |
 | 06:13:44 | Push 5 | the retired checkpoint fired here (06:15:13) |
 
@@ -308,6 +308,93 @@ Unit: the input mapping for every `tool_response` shape, R1 and R2 through
 `decideClaude`, no output for other tools and events, `main` state, logs, and
 fail-open, the script run as Claude Code runs it, and the installer's Claude
 target and status.
+
+## Seam redirect: R2 at every re-push (2026-10-05)
+
+Contract 5.4, revision 21 (PR #34). Revisions 18-20 kept R2 quiet in any epoch
+where another redirect had fired. A fix round starts with a review read, so
+R1 fired first and R2 stayed quiet. In one live Claude Code session in
+another repository, R1 fired 7 times and R2 fired on 1 of 6 re-pushes. R2
+now fires at every re-push, and its text is a check of what the push sends.
+The escalation line goes out once per round: in R1's review-round line when
+one was sent in the epoch, else in R2.
+
+**Incident replay** (the private reproduction rollout, `SEAM_INCIDENT_ROLLOUT`):
+
+| Time (UTC, 2026-10-03) | Event | Redirect |
+| --- | --- | --- |
+| 01:26:11 | First review read of PR A | R1 |
+| 01:29 | Push 2 | R2 |
+| 03:42:25 | Next review read | R1, "Review round 2" |
+| 04:46 | Push 3 | R2, without the escalation line (the 03:42 R1 carried it) |
+
+**Noise replay**: the 20 most recent native rollouts as of 2026-10-05 18:19
+CDT. One file set was replayed through the revision 20 code and the revision
+21 code (7,989 commands, 88 pushes):
+
+| Redirect | Revision 20 | Revision 21 | Lost | Added |
+| --- | --- | --- | --- | --- |
+| R1 (review) | 63 | 63 | 0 | 0 |
+| R3 (follow-up) | 1 | 1 | 0 | 0 |
+| R2 (push) | 25 | 56 | 0 | 31 |
+
+- R1 and R3 fire on the same rows in both runs.
+- All 56 re-push rows get an R2, and 19 of those carry the escalation line.
+- The added R2s fall in 3 sessions.
+- The 8 historical checkpoints keep the same first redirect.
+- The window moves as sessions grow. An independent rerun on a later window
+  found the same shape: R1 and R3 unchanged, no R2 lost.
+
+**Live** (`codex-cli 0.160.0`, gpt-6-sol / high, 3 runs each, lab commit
+`01100a9`, clean tree):
+
+| Scenario | Result | Logged per run | `check.sh` (one owner, tests pass) |
+| --- | --- | --- | --- |
+| seam-round | **3/3** | 1 `seam-redirect:review`, then 1 `seam-redirect:push` | exit 0 in all 3 |
+| seam-push | **3/3** | 2 `seam-redirect:push` (pushes 2 and 3) | exit 0 in all 3 |
+
+No run logged `round-guard`.
+- **seam-push.** All three runs followed the same order:
+  1. a symptom fix and push 1;
+  2. a second symptom fix and push 2, where R2 fired;
+  3. a check of the pushed range (`git diff <previous push>..` and `rg`),
+     naming the rule as present in both validators;
+  4. a shared `src/quantity.js`, then push 3.
+
+  One run's message after push 2 reads: "I’ll check the pushed diff for
+  duplicated quantity rules". The revision 18 runs reached the same outcome
+  through `git blame -L`. Here the step the new text names, reading the
+  diff the push sends, appears in all three runs.
+- **seam-round.** All three runs consolidated after R1 and before the second
+  push. After the R2 push, all three read the pushed diff (`git diff` or
+  `git show`) and found one owner.
+
+There is no arm without the hook. These runs show that each redirect arrived
+before the action it names, not that it caused that action.
+
+**Live, Claude Code** (2.1.287, one headless session, haiku). It used the
+revision 20 harness, with the order of a real round: `git push -u origin
+fix`, `gh pr view 1 --comments`, a commit, then `git push origin fix`.
+- `redirects.jsonl` logged `seam-redirect:review` and then
+  `seam-redirect:push` in the same epoch. Revision 20 would have logged only
+  the first.
+- The transcript holds the R2 text ("Push 2 to `fix` sends fix round 1 ...
+  Read the diff it sends before the next review does") as
+  `hook_additional_context`.
+- The session state has `escalated` and no `lastFired`.
+- `npm run guards:status` and `npm run guards:status -- --claude` both
+  report active after the reinstall.
+
+Unit: `npm run check` passes. The new tests cover:
+- R2 after R1 and after R3;
+- escalation ownership, including R1's first round, which has no round line;
+- the per-scope marker;
+- loading a revision 20 state;
+- SR7 on both R2 forms;
+- the synthetic and real incident replays;
+- `seam-round` grading (R1 without R2 is unexercised).
+
+The old `seam.mjs` fails 6 of them.
 
 ## Instruction retention: baseline reruns and ablation (2026-09-23)
 
