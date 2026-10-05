@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 18; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-17, and by revision 18 if accepted (the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18. Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 19; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -585,17 +585,35 @@ the live guard is the dispatcher's port.
 ### Observable behavior
 
 Definitions:
-- **Push epoch**: the number of `git push` commands the dispatcher has seen at
-  PreToolUse in this session. Pushes are counted with `pushesIn` from
-  `stop/round-guard.mjs` (the command-position rules of revision 16), so one
-  parser defines a push. An attempted push counts, even if the remote rejects
-  it. Hooks see each executed command, so the source-literal loop problem of
-  revision 16 does not apply here.
+- **Directory scope**: the directory a command runs in: `-C <dir>`, then a
+  leading `cd <dir>`, then the hook `cwd`. It is the one owner of "where" in
+  the seam redirect (revision 19). Branch keys, PR keys without a stated
+  repository, and push epochs all use it.
+- **Push epoch**: per directory scope, the number of `git push` commands the
+  dispatcher has seen at PreToolUse from that scope in this session
+  (revision 19; revision 18 counted every push in the session, so a push in
+  repository B started a new round for a PR of repository A). Every
+  per-epoch rule reads the epoch of the triggering command's scope: R1 the
+  read's, R2 the push's, and R3 the created branch's or the
+  `gh pr create`'s. That covers the SR3 stamps, R1's round count, and R2's
+  quiet rule. A stamp records its scope with the epoch, so a PR key read from
+  two scopes does not share an epoch. A PR key prefixed with a stated
+  repository is still measured against the epoch of the scope the read runs
+  in, because mapping a repository to a directory needs I/O (SR4). Pushes
+  are counted with `pushesIn` from `stop/round-guard.mjs` (the
+  command-position rules of revision 16), so one parser defines a push. An
+  attempted push counts, even if the remote rejects it. Hooks see each
+  executed command, so the source-literal loop problem of revision 16 does
+  not apply here.
 - **Own branch**: a branch this session created or opened a PR from,
   learned without running git (SR4). Either is enough:
   - the `--head`/`-H` of a `gh pr create` the session ran;
-  - a branch the session created with `git checkout -b`/`-B`,
-    `git switch -c`/`-C`, or `git worktree add -b`/`-B`.
+  - a branch the session created with `git checkout -b`,
+    `git switch -c`/`--create`, or `git worktree add -b`. Git refuses these
+    when the branch exists. The reset forms (`checkout -B`, `switch -C`/
+    `--force-create`, `worktree add -B`) also reset an existing branch, so
+    they prove nothing: `git checkout -B develop origin/develop` resets a
+    shared branch (revision 19).
 
   A push alone is not proof of ownership. Sessions push shared branches too:
   a default branch such as `develop` or `trunk` in maintenance, and `main` in
@@ -611,8 +629,8 @@ Definitions:
   The reproduction session read another repository's PR in the same GraphQL
   query. So every key carries where it belongs:
   - **Branch keys** (push subjects, own branches, and `gh pr create`
-    `--base`/`--head`) are prefixed with the command's directory: `-C <dir>`,
-    then a leading `cd <dir>`, then the hook `cwd`. `pushesIn` reports that
+    `--base`/`--head`) are prefixed with the command's directory scope:
+    `-C <dir>`, then a leading `cd <dir>`, then the hook `cwd`. `pushesIn` reports that
     directory for every push. Its `key` for named branches is unchanged, so
     the parity with the Claude original holds.
   - **PR keys** are prefixed with the repository the command states:
@@ -633,7 +651,7 @@ or records a pending redirect.
 | # | Trigger | Event | Fires when (all conditions) | Once per |
 |---|---|---|---|---|
 | R1 | review read | PostToolUse (the redirect arrives right after the findings) | The output shows review text: a JSON response with a non-empty `body` anywhere, or non-empty output that is not JSON (for example `gh pr view --comments`). A JSON response with no `body` (a status check that happens to include `reviews`) and an empty output do not fire and consume no stamp. In the noise replay, 31 of 246 matching reads were JSON with no review text. The command segment is one of: `gh pr view [N]` with `--comments`; `gh pr view [N] --json` naming `comments`, `reviews`, or `latestReviews`; `gh api repos/<o>/<r>/pulls/<N>/(comments\|reviews)[/...]`; `gh api repos/<o>/<r>/issues/<N>/comments`; `gh api graphql` whose query names `pullRequest(number:<N>)` and `reviewThreads`, `reviews`, or `comments`; `codex-pr-status ... --pr <N>` | (PR key, push epoch) |
-| R2 | re-push | PreToolUse context (Q10: the push runs) | A push to a subject this session has already pushed at least once (round R >= 2), and no seam redirect has fired in the current epoch | (subject, push epoch) |
+| R2 | re-push | PreToolUse context (Q10: the push runs) | A push to a subject this session has already pushed at least once (round R >= 2), and no seam redirect has fired in the current epoch of the push's directory scope | (subject, push epoch) |
 | R3 | follow-up work on own work | PreToolUse context | Earliest, before any work: a branch created with an own branch as its start point (`git checkout -b <new> <own>`, `git switch -c <new> <own>`, or `git worktree add -b <new> <path> <own>`). Then at the PR: `gh pr create` with `--base`/`-B` naming an own branch (stacked on own work). A PR title and an earlier `gh pr merge` are not a trigger: chronology and a common title word do not tie a new PR to merged work, so an unstacked "Fix ..." PR gets no R3. A context-only hook cannot stop the create (Q10), so the PR-time text is written for after the PR exists | (start point or base; push epoch) |
 
 All three parse with `segments` from `lib/shell.mjs`. Quoted text, `echo` and
@@ -819,6 +837,10 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
     same PR number in two stated repositories, and `--base feature` in
     another directory must not affect each other. `--base main` and
     `--base master` never count as stacked.
+  - Epochs are per directory scope (revision 19): read PR 12 in `/a`, push
+    in `/b`, and reread PR 12 in `/a` gives no second R1. A push in `/a`
+    and then a reread gives R1 with the review-round-2 line. An R1 in `/a`
+    does not quiet R2 for a re-push in `/b`.
   - R1 must trip again after a push, with the review-round-2 line on its
     second firing for the same PR, and must name each unstamped PR of a
     multi-PR query.
@@ -836,7 +858,11 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
     `--base develop` after `git push origin develop`, on `--base main` after
     only `git push origin HEAD` pushes, on `--base main` with a feature
     title, or on an unstacked fix-titled create, with or without an earlier
-    `gh pr merge` in the session.
+    `gh pr merge` in the session. The reset forms record no own branch:
+    after `git checkout -B develop origin/develop`, `git switch -C develop`,
+    `git switch --force-create develop`, or
+    `git worktree add -B develop ../wt`, a later
+    `git checkout -b fix develop` gives no R3.
   - The output validates against the probe-verified context shapes (Q4 for
     PostToolUse, Q10 for PreToolUse).
 - **Redirect only.** Across the unit fixtures:
@@ -952,6 +978,14 @@ step-5 trim candidate.
     review read; R2 needs two pushes in that session.
   - A push the remote rejects still advances the epoch, which costs at most
     one extra redirect.
+  - A review read run from a directory other than the repository's checkout
+    (for example `gh pr view 12 --repo o/b --comments` from repository A's
+    directory) is measured against that directory's pushes. Its R1 rounds
+    then follow A's pushes, which can add or drop an escalation line, never
+    block.
+  - Ownership is recorded at PreToolUse, before git runs. A `checkout -b`
+    that git refuses because the branch exists still records the branch as
+    own, which can add one R3.
   - Missing or malformed session state is treated as empty, which costs at
     most one repeated redirect.
   - A review read that finds nothing new still counts as a review round, so
