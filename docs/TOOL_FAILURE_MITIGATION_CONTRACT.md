@@ -1026,6 +1026,14 @@ Failure cases:
 - The hook applies to Claude sessions that load it. A session already running
   at install time may keep its earlier hook set; the live check uses a new
   session.
+- On Windows without Git Bash, Claude Code runs shell commands through its
+  PowerShell tool, which a `Bash` matcher never sees, so the seam redirect is
+  inactive there. The seam module parses POSIX shell, so PowerShell needs
+  its own parsing decision before it is registered (issue #33).
+- The installer recognizes its own entries by the install-dir-relative script
+  path, with path separators normalized. A Windows install writes
+  backslashes into the command, and an unnormalized match would append a
+  duplicate entry on every re-run, so each push would be counted twice.
 
 Settling evidence for revision 20:
 - **Unit.**
