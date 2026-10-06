@@ -3,8 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { directoryOf } from "../hooks/codex-guards/stop/round-guard.mjs";
 import { decide, main, runStopGates } from "../hooks/codex-guards/guard.mjs";
-import { branchText, createdBranches, emptySeam, findingLocations, followupText, prCreate, PUSH_ESCALATION, pushText, quoteArg, reviewReads, reviewText, safePath, seamAfter, seamBefore } from "../hooks/codex-guards/guards/seam.mjs";
+import { branchText, createdBranches, emptySeam, findingLocations, followupText, learnedOwnership, prCreate, PUSH_ESCALATION, pushText, quoteArg, reviewReads, reviewText, safePath, seamAfter, seamBefore } from "../hooks/codex-guards/guards/seam.mjs";
 import { segments, withoutHeredocs } from "../hooks/codex-guards/lib/shell.mjs";
 import { R } from "./codex-rollout-rows.mjs";
 
@@ -14,6 +15,9 @@ const pre = (command, state = {}, extra = {}) => decide({ hook_event_name: "PreT
 const post = (command, state = {}, response = "") => decide({ hook_event_name: "PostToolUse", tool_name: "Bash", cwd: "/r", tool_input: { command }, tool_response: response }, { pending: [], ...state }, { guards: [] });
 const context = (result) => result.output?.hookSpecificOutput?.additionalContext ?? null;
 const kinds = (result) => (result.log ?? []).filter((entry) => entry.code === "seam-redirect").map((entry) => entry.kind);
+// A session that pushed to the test repositories, for tests about something
+// other than own work (contract 5.4 revision 22).
+const OWN = { seam: { ...emptySeam(), ownRepos: ["o/r", "o/a", "o/b"] } };
 // Runs events in order, threading state; returns every result.
 function run(events, state = {}) {
   const results = [];
@@ -98,7 +102,7 @@ test("R1 needs review text: a status check with no body and an empty output do n
 test("repository namespacing: branches by directory, PRs by stated repository", () => {
   const pushes = run([["pre", "cd /a && git push origin feature"], ["pre", "cd /b && git push origin feature"]]);
   assert.equal(context(pushes[1]), null, "the first push of feature in /b is not push 2");
-  const prs = run([["post", "gh pr view 12 --repo o/a --comments"], ["post", "gh pr view 12 --repo o/b --comments"], ["pre", "git push origin x"], ["post", "gh pr view 12 --repo o/b --comments"]]);
+  const prs = run([["post", "gh pr view 12 --repo o/a --comments"], ["post", "gh pr view 12 --repo o/b --comments"], ["pre", "git push origin x"], ["post", "gh pr view 12 --repo o/b --comments"]], OWN);
   assert.match(context(prs[1]), /Review feedback on PR #12\./, "PR 12 in another repository is its own key");
   assert.match(context(prs[3]), /Review round 2 on PR #12/);
   assert.equal(prs[3].state.seam.rounds["o/a#12"], 1, "o/a#12 was not escalated by o/b's rounds");
@@ -118,7 +122,7 @@ test("R1 fires once per PR per push epoch, again after a push with the review-ro
     ["pre", "git push origin fix"],
     ["post", "gh pr view 12 -R o/r --comments"],
     ["post", "gh api graphql -f query='query { repository(owner:\"o\",name:\"r\") { a:pullRequest(number:12) { comments(last:1) { nodes { body } } } b:pullRequest(number:13) { reviewThreads(first:1) { nodes { id } } } } }'"]
-  ]);
+  ], OWN);
   assert.match(context(first), /^\[seam-redirect\] Review feedback on PR #12\./);
   assert.doesNotMatch(context(first), /Review round/);
   assert.deepEqual(kinds(first), ["review"]);
@@ -126,22 +130,23 @@ test("R1 fires once per PR per push epoch, again after a push with the review-ro
   assert.match(context(second), /Review round 2 on PR #12: findings that keep arriving in one class/);
   assert.match(context(multi), /Review feedback on PR #13\./, "PR 12 is already stamped in this epoch; 13 is fresh");
   assert.equal(second.state.seam.rounds["o/r#12"], 2);
-  const mixed = run([["post", "gh pr view 12 --comments"], ["post", "gh api repos/o/r/pulls/12/comments"]]);
+  const mixed = run([["post", "gh pr view 12 --comments"], ["post", "gh api repos/o/r/pulls/12/comments"]], OWN);
   assert.ok(context(mixed[1]), "a directory-scoped and a repository-scoped read are different keys (contract 5.4: no stated repository, no match)");
 });
 
 test("epochs are per directory scope: a push in another repository starts no round here (revision 19)", () => {
+  // The session directory is /r: its reads are own work before any push there (revision 22).
   const [first, , reread, , again] = run([
-    ["post", "cd /a && gh pr view 12 --comments"],
+    ["post", "gh pr view 12 --comments"],
     ["pre", "cd /b && git push origin feature"],
-    ["post", "cd /a && gh pr view 12 --comments"],
-    ["pre", "cd /a && git push origin fix"],
-    ["post", "cd /a && gh pr view 12 --comments"]
+    ["post", "gh pr view 12 --comments"],
+    ["pre", "git push origin fix"],
+    ["post", "gh pr view 12 --comments"]
   ]);
   assert.ok(context(first));
-  assert.equal(context(reread), null, "a push in /b is not a new round for /a's PR");
-  assert.match(context(again), /Review round 2 on PR #12/, "a push in /a is");
-  assert.deepEqual(again.state.seam.epochs, { "/b": 1, "/a": 1 });
+  assert.equal(context(reread), null, "a push in /b is not a new round for /r's PR");
+  assert.match(context(again), /Review round 2 on PR #12/, "a push in /r is");
+  assert.deepEqual(again.state.seam.epochs, { "/b": 1, "/r": 1 });
   // /a's R1 sends its review-round line in /a's epoch 2; /b's third push is in
   // /b's epoch 2, so an unscoped marker would drop /b's escalation line.
   const scoped = run([
@@ -152,7 +157,7 @@ test("epochs are per directory scope: a push in another repository starts no rou
   assert.match(context(scoped[3]), /Review round 2 on PR #12/);
   assert.deepEqual(scoped[3].state.seam.escalated, { "/a": 2 });
   assert.equal(context(scoped.at(-1)), pushText(3, "`feature`", true), "an R1 review-round line in /a does not drop R2's escalation line in /b");
-  const repoScoped = run([["post", "gh pr view 12 --repo o/r --comments"], ["post", "cd /x && gh pr view 12 --repo o/r --comments"]]);
+  const repoScoped = run([["post", "gh pr view 12 --repo o/r --comments"], ["post", "cd /x && gh pr view 12 --repo o/r --comments"]], OWN);
   assert.ok(context(repoScoped[1]), "a stamp records its scope: one key read from two scopes does not share an epoch");
 });
 
@@ -173,7 +178,7 @@ test("R1 fills concrete trace commands from REST and GraphQL review output, else
   const jqLines = ['{"path":"a.js","line":1}', '{"path":"b.js","line":2}', '{"path":"c.js","line":3}', '{"path":"d.js","line":4}'].join("\n");
   assert.equal(findingLocations(jqLines).length, 3, "at most 3");
   assert.deepEqual(findingLocations("reviewer: src/a.py:12 still breaks"), [], "plain text gives no locations");
-  const [filled] = run([["post", "gh api repos/o/r/pulls/9/comments", rest]]);
+  const [filled] = run([["post", "gh api repos/o/r/pulls/9/comments", rest]], OWN);
   assert.match(context(filled), /git log -L 12,12:src\/a\.py; git log -L 40,40:src\/b\.py/);
   const [generic] = run([["post", "gh pr view 9 --comments", "reviewer: it breaks"]]);
   assert.match(context(generic), /git blame -L <line>,<line> <path> for each finding/);
@@ -199,7 +204,7 @@ test("review-derived paths are quoted or dropped: the malicious-path fixture", (
   assert.equal(quoteArg("it's.py"), "'it'\\''s.py'");
   assert.equal(quoteArg("src/a-b_c.py"), "src/a-b_c.py", "plain paths stay bare");
   for (const bad of ["", "-x", "a\tb", "a\u007fb", "a\\b"]) assert.equal(safePath(bad), false, JSON.stringify(bad));
-  const [onlyBad] = run([["post", "gh api repos/o/r/pulls/2/comments", JSON.stringify([{ path: "-oops", line: 1, body: "x" }])]]);
+  const [onlyBad] = run([["post", "gh api repos/o/r/pulls/2/comments", JSON.stringify([{ path: "-oops", line: 1, body: "x" }])]], OWN);
   assert.match(context(onlyBad), /git blame -L <line>,<line> <path> for each finding/, "every path dropped: the generic form");
 });
 
@@ -272,12 +277,82 @@ test("emit false (another guard rewrote the call): nothing fires or is stamped, 
   assert.deepEqual(live.fired.map((entry) => entry.kind), ["push"], "the next emitted push fires R2");
 });
 
+test("R1 only on own work (revision 22): a review-only session's reads of other repositories", () => {
+  const reads = [
+    ["post", "gh api repos/o/other/pulls/131/reviews -q '.[] | .body'", "the limit is duplicated"],
+    ["post", "gh api graphql -f query='query { repository(owner:\"o\",name:\"other\") { pullRequest(number:116) { reviewThreads(first:9) { nodes { comments(first:1) { nodes { body } } } } } } }'", JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ comments: { nodes: [{ body: "finding" }] } }] } } } } })],
+    ["post", "gh pr view 3 -R o/other --json comments", JSON.stringify({ comments: [{ body: "finding" }] })],
+    ["post", "cd /elsewhere && gh pr view 131 --json comments -q '.comments[] | .body'", "finding"]
+  ];
+  // The session pushed only to its own repository, from its own directory.
+  const results = run([["pre", "git push origin notes"], ["post", "git push origin notes", "To https://github.com/o/own\n   1a2b3c4..5d6e7f8  notes -> notes\n"], ...reads]);
+  assert.deepEqual(results[1].state.seam.ownRepos, ["o/own"]);
+  assert.deepEqual(results.slice(2).map(context), [null, null, null, null]);
+  assert.deepEqual(results.at(-1).state.seam.rounds, {}, "someone else's PR consumes no review round");
+  assert.deepEqual(results.at(-1).state.seam.stamps, {}, "and no stamp");
+  // The same stated read after a push to that repository is own work.
+  const pushedThere = run([["pre", "git push origin fix"], ["post", "git push origin fix", "To github.com:o/other.git\n"], reads[0]]);
+  assert.match(context(pushedThere[2]), /Review feedback on PR #131\./);
+  // And a directory read after a push from that directory.
+  const fromThere = run([["pre", "cd /elsewhere && git push origin fix"], reads[3]]);
+  assert.match(context(fromThere[1]), /Review feedback on PR #131\./);
+});
+
+test("R1 on an issue-API thread only for a PR the session opened (revision 22)", () => {
+  const thread = ["post", "gh api repos/o/r/issues/94/comments", JSON.stringify([{ body: "a comment" }])];
+  assert.equal(context(run([thread], OWN)[0]), null, "an own repository's issue thread may be an issue: no R1");
+  const opened = run([["pre", "gh pr create --base main --head fix --title x"], ["post", "gh pr create --base main --head fix --title x", "https://github.com/o/r/pull/94\n"], thread]);
+  assert.deepEqual(opened[1].state.seam.ownPrs, ["o/r#94"]);
+  assert.deepEqual(opened[1].state.seam.ownRepos, ["o/r"], "opening a PR also makes its repository own");
+  assert.match(context(opened[2]), /Review feedback on PR #94\./);
+});
+
+test("filtered output is review text only when the filter names body (revision 22)", () => {
+  const states = ["post", "gh api graphql -f query='query { repository(owner:\"o\",name:\"r\") { pullRequest(number:89) { reviewThreads(first:9) { nodes { isResolved } } } } }' -q '[.data.repository.pullRequest.reviewThreads.nodes[] | .isResolved] | group_by(.) | map(length)'", "true: 3"];
+  assert.equal(context(run([states], OWN)[0]), null, "thread states printed as text");
+  const counted = run([states, ["post", "gh api repos/o/r/pulls/89/comments --jq '.[] | .path + \": \" + .body'", "src/a.js: still breaks"]], OWN);
+  assert.deepEqual(counted[0].state.seam.stamps, {}, "the state check consumed no stamp");
+  assert.match(context(counted[1]), /Review feedback on PR #89\./, "a filter that names body");
+  assert.ok(context(run([["post", "gh api repos/o/r/pulls/89/comments -q '.[0]'", JSON.stringify({ path: "a", body: "finding" })]], OWN)[0]), "a filter that keeps JSON is judged by the JSON");
+  assert.ok(context(run([["post", "gh pr view 89 --comments", "reviewer: still breaks"]])[0]), "no filter: plain text is review text, as before");
+});
+
+test("directory scope: a leading cd ends at &&, ;, or a newline (revision 22)", () => {
+  for (const command of ["cd /a && x", "cd /a; x", "cd /a;x", "cd /a\nx", "cd '/a' ; x"]) assert.equal(directoryOf(command, "/r"), "/a", JSON.stringify(command));
+  assert.equal(directoryOf('cd "/a b" ; x', "/r"), "/a b");
+  for (const command of ["cd /a || exit; x", "cd /a", "x; cd /a; y", "echo cd /a; x"]) assert.equal(directoryOf(command, "/r"), "/r", JSON.stringify(command));
+  // The observed read: `cd <repo>; ...; gh pr view N --json comments` is scoped to <repo>, not the session directory.
+  assert.equal(context(run([["post", "cd /elsewhere; git log -1; gh pr view 131 --json comments -q '.comments[] | .body'", "finding"]])[0]), null);
+});
+
+test("own work is learned from push To lines and gh pr create URL lines only (revision 22)", () => {
+  const learn = (command, output) => learnedOwnership(command, output, "/r");
+  for (const [line, repo] of [["To https://github.com/O/Own.git", "o/own"], ["To https://x-access-token@github.com/o/own", "o/own"], ["To github.com:o/own.git", "o/own"], ["To git@github.com:o/own.git", "o/own"], ["To ssh://git@github.com/o/my.repo.git", "o/my.repo"], ["To ssh://github.com/o/own", "o/own"]]) {
+    assert.deepEqual(learn("git push origin x", `${line}\n * [new branch]      x -> x\n`).repos, [repo], line);
+  }
+  assert.deepEqual(learn("git push -q origin x", ""), { repos: [], prs: [] }, "a quiet push teaches nothing");
+  assert.deepEqual(learn("git push origin x", "To /tmp/remote.git\n"), { repos: [], prs: [] }, "a remote that is not github.com");
+  assert.deepEqual(learn("git push origin x", "To regenerate the lockfile, run npm install\n"), { repos: [], prs: [] }, "prose that starts with To");
+  assert.deepEqual(learn("cat push.log", "To https://github.com/o/own\n"), { repos: [], prs: [] }, "only a push's output counts");
+  assert.deepEqual(learn("gh pr view 5 --json url -q .url", "https://github.com/o/x/pull/5\n"), { repos: [], prs: [] }, "only gh pr create's output counts");
+  assert.deepEqual(learn("gh pr create --title t", "see https://github.com/o/x/pull/4 for context\nrelated: https://github.com/o/x/pull/3\nhttps://github.com/o/x/pull/5\n").prs, ["o/x#5"], "only a line that is the URL");
+  // A PR opened in one directory, read with its repository stated from another.
+  const opened = run([["post", "cd /w && gh pr create --base main --head f --title t", "https://github.com/o/x/pull/7\n"], ["post", "cd /elsewhere && gh api repos/o/x/pulls/7/comments", JSON.stringify([{ body: "finding" }])]]);
+  assert.match(context(opened[1]), /Review feedback on PR #7\./);
+  // A read stating no repository, from the session directory, before any push (the seam-review shape).
+  assert.match(context(run([["post", "gh pr view 1 --comments", "reviewer: finding"]])[0]), /Review feedback on PR #1\./);
+  // A script that pushes and then reads counts its own push.
+  const oneScript = run([["post", "git push origin fix && gh api repos/o/y/pulls/2/comments", `To https://github.com/o/y\n${JSON.stringify([{ body: "finding" }])}`]]);
+  assert.match(context(oneScript[0]), /Review feedback on PR #2\./);
+});
+
 test("a revision 20 state loads: its lastFired is dropped and does not quiet R2", () => {
   const seam = { epochs: { "/r": 1 }, pushes: { "/r|fix": 1 }, own: [], rounds: { "dir:/r#3": 1 }, stamps: { "review:dir:/r#3": "/r@1" }, lastFired: { "/r": 1 } };
   const out = seamBefore({ command: "git push origin fix", cwd: "/r", seam });
   assert.deepEqual(out.fired.map((entry) => entry.kind), ["push"]);
   assert.equal(out.seam.lastFired, undefined);
   assert.deepEqual(out.seam.escalated, {});
+  assert.deepEqual([out.seam.ownRepos, out.seam.ownPrs], [[], []], "a state without own work loads as empty lists (revision 22)");
 });
 
 test("R3 fires on a PR stacked on an own branch; not on a fix title, with or without an earlier merge", () => {

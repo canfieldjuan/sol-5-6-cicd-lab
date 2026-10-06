@@ -50,6 +50,20 @@ test("R1 reads review text from stdout; no R1 when stdout and stderr are empty",
   assert.ok(context(later), "the same epoch still fires once review text arrives");
 });
 
+test("own work through Claude's tool_response: the push's To line arrives in stderr (revision 22)", () => {
+  const read = event("PostToolUse", "gh api repos/o/r/pulls/7/comments", { tool_response: { stdout: JSON.stringify([{ body: "finding" }]), stderr: "", interrupted: false } });
+  const [before] = run([read]);
+  assert.equal(before.output, null, "a stated repository the session never pushed to");
+  const [, pushed, after] = run([
+    event("PreToolUse", "git push origin fix"),
+    event("PostToolUse", "git push origin fix", { tool_response: { stdout: "", stderr: "To https://github.com/o/r\n   1a2b3c4..5d6e7f8  fix -> fix\n", interrupted: false } }),
+    read
+  ]);
+  assert.deepEqual(pushed.state.seam.ownRepos, ["o/r"]);
+  assert.match(context(after), /^\[seam-redirect\] Review feedback on PR #7\./);
+  assert.deepEqual(after.log, [{ code: "seam-redirect", kind: "review" }]);
+});
+
 test("other tools and other events give no output and leave the state alone", () => {
   const state = { pending: [], seam: { epochs: { "/r": 1 } } };
   for (const input of [

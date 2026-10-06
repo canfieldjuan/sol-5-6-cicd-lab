@@ -12,11 +12,17 @@
 // command's workdir (probe Q7), while the replay passes the row's real cwd.
 // That only changes the keys of HEAD and bare pushes.
 //
+// A Claude Code transcript (`--claude`, revision 22) is replayed through the
+// Claude adapter instead: each Bash tool call with the tool result that
+// answers it. Its rows carry the session cwd, which is what the hook sees.
+//
 // Usage: node scripts/replay-seam-redirect.mjs <rollout.jsonl> [--json]
 //        node scripts/replay-seam-redirect.mjs --recent 20 [--sessions DIR] [--json]
+//        node scripts/replay-seam-redirect.mjs --claude <transcript.jsonl> [--json]
 import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { decideClaude } from "../hooks/codex-guards/claude-seam.mjs";
 import { decide } from "../hooks/codex-guards/guard.mjs";
 import { CODE, PUSH_ESCALATION } from "../hooks/codex-guards/guards/seam.mjs";
 import { executedCommand } from "../hooks/codex-guards/lib/rollout.mjs";
@@ -44,7 +50,36 @@ function* executions(text) {
   }
 }
 
-export function replaySeam(text) {
+// Each executed command, as {at, cmd, workdir, response}.
+function* codexCommands(text) {
+  for (const { at, item } of executions(text)) {
+    const { cmd, workdir } = executedCommand(item);
+    yield { at, cmd, workdir, response: item.aggregated_output ?? "" };
+  }
+}
+
+// Each Bash tool call in a Claude Code transcript, in order, with the
+// `toolUseResult` (stdout and stderr) of the row that answers it.
+export function* claudeCommands(text) {
+  const rows = [];
+  for (const line of text.split("\n")) { try { rows.push(JSON.parse(line)); } catch {} }
+  const results = new Map();
+  for (const row of rows) {
+    if (row?.type !== "user" || !Array.isArray(row.message?.content)) continue;
+    for (const block of row.message.content) if (block?.type === "tool_result") results.set(block.tool_use_id, row.toolUseResult ?? block.content ?? "");
+  }
+  const seen = new Set();
+  for (const row of rows) {
+    if (row?.type !== "assistant" || !Array.isArray(row.message?.content)) continue;
+    for (const block of row.message.content) {
+      if (block?.type !== "tool_use" || block.name !== "Bash" || seen.has(block.id)) continue;
+      seen.add(block.id);
+      yield { at: row.timestamp ?? null, cmd: String(block.input?.command ?? ""), workdir: row.cwd ?? null, response: results.get(block.id) ?? "" };
+    }
+  }
+}
+
+export function replaySeam(text, { claude = false } = {}) {
   let state = { pending: [] };
   const timeline = [];
   const counts = {};
@@ -60,22 +95,22 @@ export function replaySeam(text) {
     const afterPushes = Object.values(state.seam?.epochs ?? {}).reduce((sum, n) => sum + n, 0);
     timeline.push({ type: "redirect", at, kinds, afterPushes, scopes, headlines });
   };
-  for (const { at, item } of executions(text)) {
+  const step = claude ? (input, current) => decideClaude({ session_id: "replay", ...input }, current) : (input, current) => decide(input, current, { guards: [] });
+  for (const { at, cmd, workdir, response } of claude ? claudeCommands(text) : codexCommands(text)) {
     commands += 1;
-    const { cmd, workdir } = executedCommand(item);
     const base = { tool_name: "Bash", cwd: workdir, tool_input: { command: cmd } };
     const pushes = pushesIn({ cmd, workdir });
     // The directory scopes this command acts in (revision 19): its own, and
     // each push's. A checkpoint only counts redirects from its subject's scope.
     const scopes = [...new Set([directoryOf(withoutHeredocs(String(cmd)), workdir), ...pushes.map((push) => push.dir)].map((dir) => dir ?? "?"))];
-    const before = decide({ hook_event_name: "PreToolUse", ...base }, state, { guards: [] });
+    const before = step({ hook_event_name: "PreToolUse", ...base }, state);
     state = before.state;
     record(before, at, scopes);
     for (const push of pushes) {
       counts[push.key] = (counts[push.key] ?? 0) + 1;
       timeline.push({ type: "push", at, subject: push.key, dir: push.dir ?? "?", round: counts[push.key] });
     }
-    const after = decide({ hook_event_name: "PostToolUse", ...base, tool_response: item.aggregated_output ?? "" }, state, { guards: [] });
+    const after = step({ hook_event_name: "PostToolUse", ...base, tool_response: response }, state);
     state = after.state;
     record(after, at, scopes);
   }
@@ -127,9 +162,10 @@ export function main(argv = process.argv.slice(2)) {
     }
   } else {
     files = argv.filter((arg) => !arg.startsWith("--"));
-    if (!files.length) return fail("usage: replay-seam-redirect.mjs <rollout.jsonl> | --recent N [--sessions DIR] [--json]");
+    if (!files.length) return fail("usage: replay-seam-redirect.mjs <rollout.jsonl> | --recent N [--sessions DIR] | --claude <transcript.jsonl> [--json]");
   }
-  const reports = files.map((file) => summarize(file, replaySeam(readFileSync(file, "utf8"))));
+  const claude = argv.includes("--claude");
+  const reports = files.map((file) => summarize(file, replaySeam(readFileSync(file, "utf8"), { claude })));
   if (argv.includes("--json")) { process.stdout.write(JSON.stringify(reports, null, 2) + "\n"); return 0; }
   for (const report of reports) {
     console.log(`${path.basename(report.file)}: commands ${report.commands}, pushes ${report.pushes}, redirects ${report.redirects} (review ${report.review}, push ${report.push}, followup ${report.followup}) in ${report.pushGapsWithRedirect} push gaps`);
