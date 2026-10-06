@@ -633,9 +633,10 @@ Definitions:
     `https://github.com/<o>/<r>/pull/<N>` records `<o>/<r>#<N>` as an own PR
     and `<o>/<r>` as an own repository;
   - the key states a repository the session pushed to. A `git push` whose
-    output has a `To` line naming a GitHub remote (`https://github.com/<o>/<r>`,
-    `git@github.com:<o>/<r>`, or `ssh://git@github.com/<o>/<r>`, with or
-    without `.git`) records `<o>/<r>` as an own repository;
+    output has a `To` line naming a GitHub remote, as git prints it with the
+    user removed (`https://github.com/<o>/<r>`, `github.com:<o>/<r>`, or
+    `ssh://github.com/<o>/<r>`, with or without `.git`; real rollouts show the
+    first two), records `<o>/<r>` as an own repository;
   - the key states no repository, and its directory scope is the hook `cwd`
     (the directory the session runs in) or a directory the session has
     pushed from.
