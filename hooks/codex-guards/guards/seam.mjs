@@ -14,7 +14,8 @@ import { directoryOf, pushesIn } from "../stop/round-guard.mjs";
 // per push epoch (SR3). R2 fires at every re-push, after an R1 too (revision
 // 21): R1 comes before the fix exists, R2 checks what the push sends. Epochs
 // are per directory scope (revision 19), so a push in one repository does not
-// start a new round for another.
+// start a new round for another. R1 fires only on the session's own work
+// (revision 22), learned from push and `gh pr create` output.
 
 export const CODE = "seam-redirect";
 
@@ -40,7 +41,7 @@ const branchKey = (dir, name) => `${scopeOf(dir)}|${name}`;
 const repoScope = (owner, name) => `${owner}/${name}`.toLowerCase();
 
 export function emptySeam() {
-  return { epochs: {}, pushes: {}, own: [], rounds: {}, stamps: {}, escalated: {} };
+  return { epochs: {}, pushes: {}, own: [], rounds: {}, stamps: {}, escalated: {}, ownRepos: [], ownPrs: [] };
 }
 
 function commandWords(command) {
@@ -99,11 +100,26 @@ const REST_REVIEW = /^\/?repos\/([^/]+)\/([^/]+)\/(?:pulls\/(\d+)\/(?:comments|r
 
 // PRs a command reads review feedback for (R1), as {key, label}. Writes are
 // excluded. Keys are scoped by the stated repository, else the directory.
+//
+// Each read also carries what the own-work check needs (revision 22): the
+// number, the stated repository (null when none), the directory, whether it
+// came through the issues API, and its -q/--jq/--template filter.
 export function reviewReads(command, cwd = null) {
+  return firstPerKey(allReviewReads(command, cwd));
+}
+
+const firstPerKey = (refs) => { const seen = new Set(); return refs.filter((ref) => !seen.has(ref.key) && seen.add(ref.key)); };
+
+// Every read, duplicates kept: R1 judges each one before keeping the first
+// per key, so a read that does not count (an issue thread, a filtered state
+// check) cannot hide one that does under the same key.
+function allReviewReads(command, cwd) {
   const found = [];
-  const dirScope = `dir:${directoryOf(withoutHeredocs(String(command)), cwd) ?? "?"}`;
-  const add = (number, repo) => found.push(prRef(repo ?? dirScope, number));
+  const dir = directoryOf(withoutHeredocs(String(command)), cwd);
+  const dirScope = `dir:${dir ?? "?"}`;
+  const add = (number, repo, extra = {}) => found.push({ ...prRef(repo ?? dirScope, number), number, repo, dir, issue: false, filter: null, ...extra });
   const stated = (args) => { const value = args.first("--repo", "-R"); return typeof value === "string" && value.includes("/") ? repoScope(...value.split("/").slice(-2)) : null; };
+  const filterOf = (args) => { const value = args.first("-q", "--jq", "-t", "--template"); return typeof value === "string" ? value : null; };
   for (const words of commandWords(command)) {
     const tool = words[0].split("/").pop();
     if (tool === "codex-pr-status") {
@@ -118,7 +134,7 @@ export function reviewReads(command, cwd = null) {
       const fields = String(args.first("--json") ?? "").split(",");
       if (args.flags.has("--comments") || args.flags.has("-c") || fields.some((field) => REVIEW_FIELDS.has(field))) {
         const target = viewTarget(args.positionals[0]);
-        add(target.number, target.repo ?? stated(args));
+        add(target.number, target.repo ?? stated(args), { filter: filterOf(args) });
       }
       continue;
     }
@@ -131,17 +147,16 @@ export function reviewReads(command, cwd = null) {
     if (endpoint === "graphql") {
       const query = args.all("-f", "-F", "--field", "--raw-field").filter((value) => typeof value === "string" && value.startsWith("query=")).map((value) => value.slice(6)).join("\n");
       if (!query || /^\s*mutation\b/.test(query) || !/\b(reviewThreads|reviews|comments)\b/.test(query)) continue;
-      for (const pull of graphqlPulls(query)) add(pull.number, pull.repo);
+      for (const pull of graphqlPulls(query)) add(pull.number, pull.repo, { filter: filterOf(args) });
       continue;
     }
     const path = endpoint.split("?")[0];
     // Field flags make gh send a POST unless the method is stated as GET.
     if (path.endsWith("/replies") || (explicit === undefined && [...FIELD_FLAGS].some((flag) => args.flags.has(flag)))) continue;
     const rest = REST_REVIEW.exec(path);
-    if (rest) add(rest[3] ?? rest[4], repoScope(rest[1], rest[2]));
+    if (rest) add(rest[3] ?? rest[4], repoScope(rest[1], rest[2]), { issue: rest[4] !== undefined, filter: filterOf(args) });
   }
-  const seen = new Set();
-  return found.filter((ref) => !seen.has(ref.key) && seen.add(ref.key));
+  return found;
 }
 
 // `gh pr create` details (R3), or null.
@@ -194,11 +209,14 @@ function jsonDocuments(response) {
 // non-empty `body` anywhere, or non-empty output that is not JSON. A status
 // check that includes `reviews` but carries no review text, and an empty
 // output, do not fire.
-export function hasReviewText(response) {
+// filter: the read's -q/--jq/--template. Output that is not JSON is review
+// text only when no filter printed it, or the filter names `body`: a filter
+// that prints thread states or counts leaves none (revision 22).
+export function hasReviewText(response, filter = null) {
   const text = typeof response === "string" ? response : JSON.stringify(response ?? "");
   if (!text.trim()) return false;
   const documents = jsonDocuments(text);
-  if (!documents.length) return true;
+  if (!documents.length) return filter === null || /body/.test(filter);
   const walk = (value) => {
     if (!value || typeof value !== "object") return false;
     if (Array.isArray(value)) return value.some(walk);
@@ -289,8 +307,41 @@ export function followupText(base) {
 // longer waits on other redirects (revision 21).
 const clone = (seam) => {
   const { lastFired, ...rest } = seam ?? {};
-  return { ...emptySeam(), ...rest, epochs: { ...(seam?.epochs ?? {}) }, pushes: { ...(seam?.pushes ?? {}) }, own: [...(seam?.own ?? [])], rounds: { ...(seam?.rounds ?? {}) }, stamps: { ...(seam?.stamps ?? {}) }, escalated: { ...(seam?.escalated ?? {}) } };
+  return { ...emptySeam(), ...rest, epochs: { ...(seam?.epochs ?? {}) }, pushes: { ...(seam?.pushes ?? {}) }, own: [...(seam?.own ?? [])], rounds: { ...(seam?.rounds ?? {}) }, stamps: { ...(seam?.stamps ?? {}) }, escalated: { ...(seam?.escalated ?? {}) }, ownRepos: [...(seam?.ownRepos ?? [])], ownPrs: [...(seam?.ownPrs ?? [])] };
 };
+
+// Own work (contract 5.4, revision 22), learned from tool output only (SR4):
+// the `To` line of a push names a repository the session pushed to (git
+// prints it without the user), and the URL line `gh pr create` prints names a
+// PR it opened.
+const TO_LINE = /^To (?:https:\/\/(?:[^@\s/]+@)?github\.com\/|(?:git@)?github\.com:|ssh:\/\/(?:git@)?github\.com\/)([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?\s*$/gm;
+const PR_URL_LINE = /^\s*https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)\s*$/gm;
+
+export function learnedOwnership(command, response, cwd = null) {
+  const text = typeof response === "string" ? response : JSON.stringify(response ?? "");
+  const repos = [];
+  const prs = [];
+  if (pushesIn({ cmd: String(command), workdir: cwd }).length) for (const match of text.matchAll(TO_LINE)) repos.push(repoScope(match[1], match[2]));
+  if (prCreate(command)) {
+    for (const match of text.matchAll(PR_URL_LINE)) {
+      const repo = repoScope(match[1], match[2]);
+      repos.push(repo);
+      prs.push(`${repo}#${match[3]}`);
+    }
+  }
+  return { repos, prs };
+}
+
+// A read that states a repository is someone else's work until the session
+// pushes there or opens that PR; one that states none is own work from the
+// hook cwd or a directory the session pushed from. An issue thread counts only
+// for a PR the session opened.
+function ownWork(seam, ref, cwd) {
+  const pr = `${ref.repo}#${ref.number}`;
+  if (ref.issue) return seam.ownPrs.includes(pr);
+  if (ref.repo) return seam.ownRepos.includes(ref.repo) || seam.ownPrs.includes(pr);
+  return ref.dir === (cwd ?? null) || epochOf(seam, ref.dir) >= 1;
+}
 
 // The current epoch of a directory scope, and the stamp value for it: a stamp
 // records its scope, so one key read from two scopes never shares an epoch.
@@ -349,11 +400,15 @@ export function seamBefore({ command, cwd = null, seam, emit = true }) {
 export function seamAfter({ command, response, cwd = null, seam }) {
   const next = clone(seam);
   const fired = [];
-  const reads = reviewReads(command, cwd);
+  // Learned first, so a script that pushes and then reads counts its own push.
+  const learned = learnedOwnership(command, response, cwd);
+  for (const repo of learned.repos) if (!next.ownRepos.includes(repo)) next.ownRepos.push(repo);
+  for (const pr of learned.prs) if (!next.ownPrs.includes(pr)) next.ownPrs.push(pr);
+  // Someone else's PR, or no review text: no redirect, and no stamp consumed.
+  const reads = firstPerKey(allReviewReads(command, cwd).filter((ref) => ownWork(next, ref, cwd) && hasReviewText(response, ref.filter)));
   // A read is measured against the pushes of the scope it runs in.
   const dir = directoryOf(withoutHeredocs(String(command)), cwd);
-  // No review text arrived: no redirect, and no stamp consumed.
-  const fresh = reads.length && hasReviewText(response) ? reads.filter((ref) => next.stamps[`review:${ref.key}`] !== markOf(next, dir)) : [];
+  const fresh = reads.filter((ref) => next.stamps[`review:${ref.key}`] !== markOf(next, dir));
   if (fresh.length) {
     let round = 0;
     let roundLabel = fresh[0].label;

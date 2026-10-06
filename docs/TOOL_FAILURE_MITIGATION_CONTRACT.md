@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 22 (proposed); section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), revision 21 (PR #34: R2 at every re-push, as a check of what the push sends), and revision 22, proposed (R1 only on the session's own work). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 22; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), revision 21 (PR #34: R2 at every re-push, as a check of what the push sends), and revision 22 (PR #36: R1 only on the session's own work). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -633,9 +633,10 @@ Definitions:
     `https://github.com/<o>/<r>/pull/<N>` records `<o>/<r>#<N>` as an own PR
     and `<o>/<r>` as an own repository;
   - the key states a repository the session pushed to. A `git push` whose
-    output has a `To` line naming a GitHub remote (`https://github.com/<o>/<r>`,
-    `git@github.com:<o>/<r>`, or `ssh://git@github.com/<o>/<r>`, with or
-    without `.git`) records `<o>/<r>` as an own repository;
+    output has a `To` line naming a GitHub remote, as git prints it with the
+    user removed (`https://github.com/<o>/<r>`, `github.com:<o>/<r>`, or
+    `ssh://github.com/<o>/<r>`, with or without `.git`; real rollouts show the
+    first two), records `<o>/<r>` as an own repository;
   - the key states no repository, and its directory scope is the hook `cwd`
     (the directory the session runs in) or a directory the session has
     pushed from.
@@ -1229,6 +1230,12 @@ Failure cases:
 - A bot notice in an own PR's conversation (for example a usage-limit
   comment), read with a filter that names `body`, still counts as review
   text.
+- Ownership is learned from the whole output of a command that pushes or
+  opens a PR, because the hook cannot split one command's output by segment.
+  If the same command also reads review text (`git push && gh pr view N -R
+  o/x --comments`), a comment containing a `To` line or a PR URL line makes
+  that repository or PR own work. The cost is redirects that should not fire,
+  which are context only (SR1). A push run on its own is not affected.
 
 Settling evidence for revision 22:
 - **Unit**, using the observed shapes with placeholder names:
@@ -1255,7 +1262,10 @@ Settling evidence for revision 22:
   above gives no R1. The transcript is private and stays local.
 - **Noise replay.** One file set of the 20 most recent rollouts, through the
   revision 21 code and the revision 22 code. R2 and R3 fire on the same rows
-  in both runs, and no R1 is added. Every dropped R1 is listed for review
+  in both runs. No R1 is added: every revision 22 R1 falls in a (PR, push
+  interval) where revision 21 also fired one. An R1 can move later within its
+  interval, when an earlier read in it is dropped and a later own read with
+  review text takes the stamp. Every dropped R1 is listed for review
   with its reason: repository not own, directory not own, issue thread, or a
   filter without `body`.
 - **Live.** `seam-review`, `seam-round`, and `seam-push` on Codex still pass.

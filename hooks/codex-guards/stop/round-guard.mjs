@@ -45,8 +45,10 @@ function resolve(target, base) {
 }
 
 // A leading `cd <dir> &&` overrides the call's workdir (relative to it).
+// A leading `cd <dir>` ends at `&&`, `;`, or a newline (contract 5.4,
+// "Directory scope"; revision 22 found `cd <dir>;` reads scoped to the cwd).
 export function directoryOf(cmd, workdir) {
-  const cd = /^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&/.exec(cmd);
+  const cd = /^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)\s*(?:&&|;|\n)/.exec(cmd);
   return cd ? resolve(unquote(cd[1]), workdir) : workdir ?? null;
 }
 

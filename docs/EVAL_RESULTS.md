@@ -395,6 +395,93 @@ Unit: `npm run check` passes. The new tests cover:
 
 The old `seam.mjs` fails 6 of them.
 
+## Seam redirect: R1 on own work only (2026-10-05)
+
+Contract 5.4, revision 22 (PR #36). A review-only Claude Code session got R1
+on all 8 of its review reads of other repositories' PRs. The redirect text
+told it to patch code it was only reviewing. Two of those reads were
+thread-state checks, and one was an issue thread that R1 called a PR. The
+contract's "Own work" definition and its R1 row own the new rule. The results
+below are measured against them.
+
+**Replays** (revision 21 code vs revision 22 code on one file set: the 20
+most recent native Codex rollouts as of 2026-10-05 19:39 CDT, 8,541
+commands, plus 3 local Claude Code transcripts through the new `--claude`
+mode):
+
+| Source | R1 rev 21 | R1 rev 22 | R2 | R3 |
+| --- | --- | --- | --- | --- |
+| 20 Codex rollouts | 65 | 59 | 61 / 61 | 1 / 1 |
+| Review-only Claude session | 45 | 0 | | |
+| Two working Claude sessions | 19 | 19 | | |
+| All | 129 | 78 | 90 / 90 | 2 / 2 |
+
+- No R2 or R3 is lost.
+- All 75 revision 22 (PR, push interval) R1s fall where revision 21 fired.
+  Two rows moved later within their interval: the earlier read stopped
+  counting, and the next own read with review text took the stamp.
+- The 55 dropped reads are listed locally. The rollouts and transcripts are
+  private, so the list is not published. By reason:
+  - 39: repository not own;
+  - 14: issue thread;
+  - 1: filter without `body`;
+  - 1: directory not own.
+- 47 of the drops come from the review-only session. The other 8 come from
+  Codex sessions:
+  - 6 are issue-API reads of PR conversation comments, for PRs that session
+    had not opened. The contract lists this loss. Those sessions still got
+    R1 on the same PRs through their `pulls/` and GraphQL reads.
+  - 1 is a GraphQL state check with a `--jq` filter. Its R1 moved 14 s
+    later, to the review read.
+  - 1 is a read that stated its repository before the session's first push
+    there. This is the picked-up-PR tradeoff.
+- The incident replay passes, with every R1 kept. Replaying the review-only
+  session gives no R1.
+
+**Live** (`codex-cli 0.160.0`, gpt-6-sol / high, 3 runs each, clean tree).
+Runs load the hooks from the repo on every call. The batch started at
+`7d780e3` and ended at `45dbf13`, which judges each read before keeping one
+per key. The two differ only for a command that reads one PR key twice. None
+of the 6 review-read commands in these runs did, so every run behaves the
+same under both.
+
+| Scenario | Result | Logged per run | `check.sh` (one owner, tests pass) |
+| --- | --- | --- | --- |
+| seam-review | **3/3** | 1 `seam-redirect:review` | exit 0 in all 3 |
+| seam-round | **3/3** | 1 `seam-redirect:review`, then 1 `seam-redirect:push` | exit 0 in all 3 |
+| seam-push | **3/3** | 2 `seam-redirect:push` (pushes 2 and 3) | exit 0 in all 3 |
+
+- `seam-review` still gets R1. Its read states no repository and runs from
+  the session directory: the picked-up-PR shape that revision 22 keeps.
+- No run logged `round-guard`.
+- Two runs logged entries from other guards, which are not graded here:
+  `evidence-gate:stop-evidence` (seam-review #3) and
+  `read-path:after-failure` (seam-push #2).
+
+**Live, Claude Code** (2.1.287, one headless session, haiku). It ran in a
+scratch repository with a local bare remote and a stub `gh`, after this
+branch was installed. The session ran `git push -u origin fix`, then
+`gh pr view 7 --repo other-owner/other-repo --comments`, then
+`gh pr view 1 --comments`.
+- `redirects.jsonl` logged one `seam-redirect:review`.
+- The transcript holds R1 text only for `PR #1`.
+- The session state stamps only the session-directory read.
+- The model reported no redirect with the other repository's read.
+
+Unit: `npm run check` passes. The new tests cover:
+- the observed reviewer shapes, with placeholder names;
+- issue threads, both opened and not;
+- filters;
+- every `To` line form, plus prose, quiet pushes, non-GitHub remotes, and
+  non-push commands;
+- learning before reads, in one script;
+- `cd …;` scoping;
+- a read that does not count not hiding one that does under the same key;
+- a synthetic Claude transcript, and the Claude adapter's `stderr` `To` line;
+- the private incident and reviewer replays (both pass locally).
+
+Mutation checks: breaking each of 11 rules fails at least one test.
+
 ## Instruction retention: baseline reruns and ablation (2026-09-23)
 
 The 3 baseline cells invalidated by the usage limit were rerun on the same arm
