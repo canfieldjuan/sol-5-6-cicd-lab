@@ -1230,6 +1230,12 @@ Failure cases:
 - A bot notice in an own PR's conversation (for example a usage-limit
   comment), read with a filter that names `body`, still counts as review
   text.
+- Ownership is learned from the whole output of a command that pushes or
+  opens a PR, because the hook cannot split one command's output by segment.
+  If the same command also reads review text (`git push && gh pr view N -R
+  o/x --comments`), a comment containing a `To` line or a PR URL line makes
+  that repository or PR own work. The cost is redirects that should not fire,
+  which are context only (SR1). A push run on its own is not affected.
 
 Settling evidence for revision 22:
 - **Unit**, using the observed shapes with placeholder names:
