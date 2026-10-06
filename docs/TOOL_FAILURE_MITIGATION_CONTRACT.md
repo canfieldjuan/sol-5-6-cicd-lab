@@ -1256,7 +1256,10 @@ Settling evidence for revision 22:
   above gives no R1. The transcript is private and stays local.
 - **Noise replay.** One file set of the 20 most recent rollouts, through the
   revision 21 code and the revision 22 code. R2 and R3 fire on the same rows
-  in both runs, and no R1 is added. Every dropped R1 is listed for review
+  in both runs. No R1 is added: every revision 22 R1 falls in a (PR, push
+  interval) where revision 21 also fired one. An R1 can move later within its
+  interval, when an earlier read in it is dropped and a later own read with
+  review text takes the stamp. Every dropped R1 is listed for review
   with its reason: repository not own, directory not own, issue thread, or a
   filter without `body`.
 - **Live.** `seam-review`, `seam-round`, and `seam-push` on Codex still pass.
