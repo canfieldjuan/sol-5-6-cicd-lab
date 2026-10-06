@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 22; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), revision 21 (PR #34: R2 at every re-push, as a check of what the push sends), and revision 22 (PR #36: R1 only on the session's own work). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 23 (proposed); section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), revision 21 (PR #34: R2 at every re-push, as a check of what the push sends), revision 22 (PR #36: R1 only on the session's own work), and revision 23, proposed (a delete is not a push; an option is never a push subject). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -368,7 +368,9 @@ Codex rollout facts, from 40 recent rollouts:
   it unverified, attribute it), which is H2 for a claim.
 - **round guard (port).** The same rules as `round-guard.sh`:
   - it counts `git push` commands per branch over the session;
-  - the refspec regex and the `<current-branch>` fallback are unchanged;
+  - the refspec regex and the `<current-branch>` fallback are unchanged
+    (revision 23 amends how the subject is read; see "Push subjects and
+    deletes (revision 23)");
   - the subject is the most recently pushed branch;
   - tiers are 5/10/15/20;
   - it fires once per (session, branch, tier).
@@ -604,7 +606,9 @@ Definitions:
   in, because mapping a repository to a directory needs I/O (SR4). Pushes
   are counted with `pushesIn` from `stop/round-guard.mjs` (the
   command-position rules of revision 16), so one parser defines a push. An
-  attempted push counts, even if the remote rejects it. Hooks see each
+  attempted push counts, even if the remote rejects it. A push that only
+  deletes remote refs is not a push, and an option is never a subject
+  (revision 23; "Push subjects and deletes" below owns these rules). Hooks see each
   executed command, so the source-literal loop problem of revision 16 does
   not apply here.
 - **Own branch**: a branch this session created or opened a PR from,
@@ -898,8 +902,8 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
     From the third push on it carries the escalation line, except in an
     epoch where R1 sent its review-round line. It must not trip on the first
     push, on a first push to a different subject,
-    on `printf '... git push origin x ...' >> ledger`, or on a `git push`
-    line inside a heredoc body.
+    on `printf '... git push origin x ...' >> ledger`, on a `git push`
+    line inside a heredoc body, or on a delete (revision 23).
   - R3 must trip on `--base <own branch>` for each own-branch source (the
     `--head` of an earlier `gh pr create`; `git checkout -b`,
     `git switch -c`, and `git worktree add -b`). It must trip at branch
@@ -1274,6 +1278,89 @@ Settling evidence for revision 22:
   `gh pr view 1 --comments` from the session directory (R1).
 - **Install.** Both targets reinstalled; both statuses pass.
 
+### Push subjects and deletes (revision 23)
+
+Observed on 2026-10-05: deleting two merged branches with
+`git push origin --delete <a> <b>` gave "[seam-redirect] Push 2 to
+`--delete`" in a Claude Code session.
+- `pushesIn` reads the subject as the first word after `origin`
+  (`/\borigin\s+(?:HEAD:)?([\w./-]+)/`). It maps only `--force`,
+  `--force-with-lease`, `-q`, and `--quiet` back to the current branch.
+- The same rule reads `git push origin -d a` as subject `-d`, and
+  `git push origin -o ci.skip fix` as subject `-o`. It reads
+  `git push --delete origin a` as a push of `a`, and
+  `git push origin :a :b` as a bare push.
+- So every `--delete` push counted toward one subject named `--delete`.
+- Each delete also advanced the push epoch, which started a new round for R1.
+
+Over the 45 days to 2026-10-05 (441 Codex rollouts and 50 Claude Code
+transcripts, 2,221 pushes), `--delete` was the only option read as a
+subject, in 46 pushes. No `-d`, no `:<ref>` delete, and no other option after
+`origin` appeared.
+
+This subsection owns what a push is and what its subject is, for the round
+counting of 5.3 and for the push epoch, R2, and the replays of 5.4:
+- **A delete is not a push.** A delete deletes remote refs and sends no
+  work. A `git push` is a delete when its arguments include `--delete` or
+  `-d`, or when every refspec has an empty source (`:<ref>`). A delete:
+  - has no subject;
+  - counts toward no round;
+  - does not advance the push epoch;
+  - gets no R2.
+
+  `pushesIn` does not report it. A push with a branch and a `:<ref>` refspec
+  is a push of that branch.
+- **An option is never a subject.** The subject is the first argument after
+  `origin` that does not start with `-`, skipping the value of
+  `-o`/`--push-option`. `HEAD:<branch>` still gives `<branch>`, and
+  `<src>:<dst>` still gives `<src>`. `git push origin --force fix` is a push
+  of `fix`; revision 16 counted it as a bare push.
+- **Unchanged:**
+  - With no such argument, it is a bare push. `git push origin --tags` is
+    one; revision 16 read `--tags` as the subject.
+  - The command-position rule (revision 16) and the directory keying
+    (revisions 15 and 19) stay as they are.
+  - An attempted push still counts.
+
+The Claude round guard these rules came from was removed in revision 20.
+The parity test holds the counter to its stated verdicts, and those gain the
+cases below.
+
+Failure cases:
+- A remote other than `origin` is still read as a bare push of the current
+  branch, as before. None appeared in the 45 days.
+- `--all`, `--mirror`, and `--tags` without a refspec stay bare pushes.
+- `--prune` deletes refs and also pushes. It counts as a push.
+
+Settling evidence for revision 23:
+- **Unit**, on `pushesIn` and R2:
+  - These are deletes, with no subject, no epoch change, and no R2:
+    - `git push origin --delete a b`;
+    - `git push origin -d a`;
+    - `git push --delete origin a`;
+    - `git push origin :a :b`;
+    - `git -C /x push origin --delete a`.
+  - A later push of `a` after one of them is push 1 of `a`.
+  - `git push origin fix :old` is a push of `fix`.
+  - Each of these is a push of `fix`: `git push origin --force fix`,
+    `git push origin -o ci.skip fix`, and `git push -u origin fix`.
+  - `git push origin --tags` is a bare push.
+  - A delete and a push in one command are one push.
+  - `roundVerdict` fires nothing for 5 deletes.
+- **Replay.** One file set of the 20 most recent rollouts and the local
+  Claude transcripts, through the revision 22 code and the revision 23 code:
+  - R3 fires on the same rows.
+  - Every R2 that disappears was at a delete.
+  - Every R1 that changes (a round line, or a stamp) follows from a delete no
+    longer advancing the epoch. Each change is listed with its cause.
+- **Live.** One headless Claude Code session in a scratch repository with a
+  local bare remote:
+  - push `a` and `b`;
+  - delete each with `git push origin --delete` in its own command (no R2 on
+    either);
+  - push `a` again (R2, push 2 of `a`).
+- **Install.** Both targets reinstalled; both statuses pass.
+
 ## 6. Failure cases
 
 - Malformed rollout lines (control characters) are parsed leniently and
@@ -1358,3 +1445,6 @@ Settling evidence for revision 22:
 10. R1 on own work only (revision 22): this revision first, stop for review.
     Then one PR: `seam.mjs`, its tests, the Claude transcript replay, and the
     eval results. Then both installs, the live checks, and both statuses.
+11. Push subjects and deletes (revision 23): this revision first, stop for
+    review. Then one PR: `pushesIn`, its tests, and the eval results. Then
+    both installs, the live check, and both statuses.
