@@ -129,7 +129,7 @@ summarized in `docs/RESEARCH_BASIS.md`; repository adaptation is documented in
 - [x] Step 6: seam redirect replaces the round guard's Stop checkpoint (revisions 18-19; incident replay redirects before push 2; noise replay 20 rollouts; live seam-review 3/3, seam-push 3/3; consolidation followed the push-2 redirect in all three seam-push runs).
 - [x] Step 6, Claude Code (revision 20): the same seam redirect through `claude-seam.mjs` and `guards:install -- --claude`; the round-guard Stop hooks removed on both sides; live headless Claude session delivered R2 and R1 as `hook_additional_context`.
 - [x] Step 6, revision 21: R2 at every re-push, as a check of what the push sends; noise replay R1/R3 unchanged, R2 25 -> 56 with none lost; live seam-round 3/3, seam-push 3/3; Claude Code live delivered R1 and R2 in one round.
-- [x] Step 6, revision 22: R1 only on the session's own work (opened PR, pushed-to repository, or the session's own or pushed-from directory); issue threads only for opened PRs; filtered output only when the filter names body. Review-only session 45 -> 0 R1 in replay; working sessions unchanged; R2/R3 unchanged; live seam-review, seam-round, seam-push 3/3 each.
+- [x] Step 6, revision 22: R1 only on the session's own work (the rule is contract 5.4's "Own work" and R1 row). Review-only session 45 -> 0 R1 in replay; working sessions unchanged; R2/R3 unchanged; live seam-review, seam-round, seam-push 3/3 each.
 
 ## Recovery
 
