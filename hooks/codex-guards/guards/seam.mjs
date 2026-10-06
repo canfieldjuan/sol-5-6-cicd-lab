@@ -105,6 +105,15 @@ const REST_REVIEW = /^\/?repos\/([^/]+)\/([^/]+)\/(?:pulls\/(\d+)\/(?:comments|r
 // number, the stated repository (null when none), the directory, whether it
 // came through the issues API, and its -q/--jq/--template filter.
 export function reviewReads(command, cwd = null) {
+  return firstPerKey(allReviewReads(command, cwd));
+}
+
+const firstPerKey = (refs) => { const seen = new Set(); return refs.filter((ref) => !seen.has(ref.key) && seen.add(ref.key)); };
+
+// Every read, duplicates kept: R1 judges each one before keeping the first
+// per key, so a read that does not count (an issue thread, a filtered state
+// check) cannot hide one that does under the same key.
+function allReviewReads(command, cwd) {
   const found = [];
   const dir = directoryOf(withoutHeredocs(String(command)), cwd);
   const dirScope = `dir:${dir ?? "?"}`;
@@ -147,8 +156,7 @@ export function reviewReads(command, cwd = null) {
     const rest = REST_REVIEW.exec(path);
     if (rest) add(rest[3] ?? rest[4], repoScope(rest[1], rest[2]), { issue: rest[4] !== undefined, filter: filterOf(args) });
   }
-  const seen = new Set();
-  return found.filter((ref) => !seen.has(ref.key) && seen.add(ref.key));
+  return found;
 }
 
 // `gh pr create` details (R3), or null.
@@ -397,7 +405,7 @@ export function seamAfter({ command, response, cwd = null, seam }) {
   for (const repo of learned.repos) if (!next.ownRepos.includes(repo)) next.ownRepos.push(repo);
   for (const pr of learned.prs) if (!next.ownPrs.includes(pr)) next.ownPrs.push(pr);
   // Someone else's PR, or no review text: no redirect, and no stamp consumed.
-  const reads = reviewReads(command, cwd).filter((ref) => ownWork(next, ref, cwd) && hasReviewText(response, ref.filter));
+  const reads = firstPerKey(allReviewReads(command, cwd).filter((ref) => ownWork(next, ref, cwd) && hasReviewText(response, ref.filter)));
   // A read is measured against the pushes of the scope it runs in.
   const dir = directoryOf(withoutHeredocs(String(command)), cwd);
   const fresh = reads.filter((ref) => next.stamps[`review:${ref.key}`] !== markOf(next, dir));

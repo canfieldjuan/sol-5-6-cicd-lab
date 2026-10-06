@@ -325,6 +325,15 @@ test("directory scope: a leading cd ends at &&, ;, or a newline (revision 22)", 
   assert.equal(context(run([["post", "cd /elsewhere; git log -1; gh pr view 131 --json comments -q '.comments[] | .body'", "finding"]])[0]), null);
 });
 
+test("a read that does not count cannot hide one that does under the same key (revision 22)", () => {
+  const review = JSON.stringify([{ body: "finding" }]);
+  const issueFirst = run([["post", "gh api repos/o/r/issues/5/comments; gh api repos/o/r/pulls/5/comments", review]], OWN);
+  assert.match(context(issueFirst[0]), /Review feedback on PR #5\./, "the issue-API read does not count; the pulls read does");
+  const stateFirst = run([["post", "gh api graphql -f query='query { repository(owner:\"o\",name:\"r\") { pullRequest(number:5) { reviewThreads(first:9) { nodes { isResolved } } } } }' -q '.data | length'; gh pr view 5 --repo o/r --comments", "reviewer: still breaks"]], OWN);
+  assert.match(context(stateFirst[0]), /Review feedback on PR #5\./, "the filtered state check does not count; the comments read does");
+  assert.deepEqual(reviewReads("gh api repos/o/r/issues/5/comments; gh api repos/o/r/pulls/5/comments", "/r").map((ref) => ref.key), ["o/r#5"], "reviewReads still lists each key once");
+});
+
 test("own work is learned from push To lines and gh pr create URL lines only (revision 22)", () => {
   const learn = (command, output) => learnedOwnership(command, output, "/r");
   for (const [line, repo] of [["To https://github.com/O/Own.git", "o/own"], ["To https://x-access-token@github.com/o/own", "o/own"], ["To github.com:o/own.git", "o/own"], ["To git@github.com:o/own.git", "o/own"], ["To ssh://git@github.com/o/my.repo.git", "o/my.repo"], ["To ssh://github.com/o/own", "o/own"]]) {
