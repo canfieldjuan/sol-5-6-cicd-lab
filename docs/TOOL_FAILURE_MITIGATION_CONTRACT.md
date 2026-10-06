@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 21; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), and revision 21 (PR #34: R2 at every re-push, as a check of what the push sends). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 22 (proposed); section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), revision 21 (PR #34: R2 at every re-push, as a check of what the push sends), and revision 22, proposed (R1 only on the session's own work). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -627,6 +627,22 @@ Definitions:
   `--head` of a PR the same session had opened.
 - **PR key**: the PR number named in the command, or `current` when none is
   named (`gh pr view --comments` on the checked-out branch).
+- **Own work** (revision 22): a PR key is the session's own work when any of
+  these holds. Each is learned from hook input and tool output only (SR4):
+  - the session opened the PR. A `gh pr create` whose output names
+    `https://github.com/<o>/<r>/pull/<N>` records `<o>/<r>#<N>` as an own PR
+    and `<o>/<r>` as an own repository;
+  - the key states a repository the session pushed to. A `git push` whose
+    output has a `To` line naming a GitHub remote (`https://github.com/<o>/<r>`,
+    `git@github.com:<o>/<r>`, or `ssh://git@github.com/<o>/<r>`, with or
+    without `.git`) records `<o>/<r>` as an own repository;
+  - the key states no repository, and its directory scope is the hook `cwd`
+    (the directory the session runs in) or a directory the session has
+    pushed from.
+
+  A repository a read states belongs to someone else until one of the first
+  two happens. A review-only session that pushes only to its own repository
+  gets no R1 for the PRs it reviews in other repositories.
 - **Repository namespacing.** One session often drives several repositories.
   The reproduction session read another repository's PR in the same GraphQL
   query. So every key carries where it belongs:
@@ -652,7 +668,7 @@ or records a pending redirect.
 
 | # | Trigger | Event | Fires when (all conditions) | Once per |
 |---|---|---|---|---|
-| R1 | review read | PostToolUse (the redirect arrives right after the findings) | The output shows review text: a JSON response with a non-empty `body` anywhere, or non-empty output that is not JSON (for example `gh pr view --comments`). A JSON response with no `body` (a status check that happens to include `reviews`) and an empty output do not fire and consume no stamp. In the noise replay, 31 of 246 matching reads were JSON with no review text. The command segment is one of: `gh pr view [N]` with `--comments`; `gh pr view [N] --json` naming `comments`, `reviews`, or `latestReviews`; `gh api repos/<o>/<r>/pulls/<N>/(comments\|reviews)[/...]`; `gh api repos/<o>/<r>/issues/<N>/comments`; `gh api graphql` whose query names `pullRequest(number:<N>)` and `reviewThreads`, `reviews`, or `comments`; `codex-pr-status ... --pr <N>` | (PR key, push epoch) |
+| R1 | review read | PostToolUse (the redirect arrives right after the findings) | The PR key is own work (revision 22; see the definition above). The output shows review text: a JSON response with a non-empty `body` anywhere, or non-empty output that is not JSON (for example `gh pr view --comments`). A JSON response with no `body` (a status check that happens to include `reviews`) and an empty output do not fire and consume no stamp. In the noise replay, 31 of 246 matching reads were JSON with no review text. Output that is not JSON counts as review text only when the read has no `-q`/`--jq`/`-t`/`--template` filter, or its filter names `body` (revision 22): a filter that prints only thread states or counts leaves no review text. The command segment is one of: `gh pr view [N]` with `--comments`; `gh pr view [N] --json` naming `comments`, `reviews`, or `latestReviews`; `gh api repos/<o>/<r>/pulls/<N>/(comments\|reviews)[/...]`; `gh api repos/<o>/<r>/issues/<N>/comments`, only for a PR the session opened (revision 22: the issues API serves issues and PRs alike, so without I/O an issue thread cannot be told from a PR's conversation); `gh api graphql` whose query names `pullRequest(number:<N>)` and `reviewThreads`, `reviews`, or `comments`; `codex-pr-status ... --pr <N>` | (PR key, push epoch) |
 | R2 | re-push | PreToolUse context (Q10: the push runs) | A push to a subject this session has already pushed at least once (round R >= 2). An R1 or R3 in the same epoch does not quiet it (revision 21; revisions 18-20 required that no seam redirect had fired in the epoch) | (subject, push epoch) |
 | R3 | follow-up work on own work | PreToolUse context | Earliest, before any work: a branch created with an own branch as its start point (`git checkout -b <new> <own>`, `git switch -c <new> <own>`, or `git worktree add -b <new> <path> <own>`). Then at the PR: `gh pr create` with `--base`/`-B` naming an own branch (stacked on own work). A PR title and an earlier `gh pr merge` are not a trigger: chronology and a common title word do not tie a new PR to merged work, so an unstacked "Fix ..." PR gets no R3. A context-only hook cannot stop the create (Q10), so the PR-time text is written for after the PR exists | (start point or base; push epoch) |
 
@@ -805,7 +821,8 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
   fix round gets R1 when its findings arrive and R2 when its fix is pushed
   (revision 21).
 - **SR4 No I/O on tool events.** R1-R3 read only the hook input (including
-  R1's `tool_response`) and the session state: no git, no gh, no network,
+  the PostToolUse `tool_response` of review reads, pushes, and
+  `gh pr create`, revision 22) and the session state: no git, no gh, no network,
   and no rollout read. (The reproduction's rollout is 44,983,979 bytes;
   reading it on every tool event is not acceptable.)
 - **SR5 Fail open (H4).** A seam error produces no redirect, lets the call
@@ -860,6 +877,7 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
   - R1 must not trip on a JSON response with no `body`, or on an empty
     output, and must trip on a later read in the same epoch that does carry
     review text.
+  - Own work (revision 22): see "R1 on own work only (revision 22)" below.
   - Keys are namespaced: the same branch name pushed in two directories, the
     same PR number in two stated repositories, and `--base feature` in
     another directory must not affect each other. `--base main` and
@@ -976,7 +994,7 @@ R3, at the PR (the call runs, so the PR exists when this arrives):
 The end-of-turn questionnaire for fix loops is gone: no "root cause / churn /
 cut / decision", and no merge-or-defer menu. Instead, while it works, Codex
 gets a one-step redirect when it:
-- reads review comments;
+- reads review comments on its own work (revision 22);
 - re-pushes a branch it has already pushed; or
 - opens a PR that repairs its own work.
 
@@ -1152,6 +1170,100 @@ Settling evidence for revision 21:
 - **Install.** Both targets reinstalled; `npm run guards:status` and
   `npm run guards:status -- --claude` pass.
 
+### R1 on own work only (revision 22)
+
+Observed on 2026-10-05, in a Claude Code session that reviewed PRs in three
+other repositories (`~/.local/state/sol-lab/claude-seam/`: 8 `review`, 0
+`push` redirects for the session):
+- R1 fired on all 8 review reads. Its text says "Before patching the line a
+  finding points at ... Then make that fix", which a reviewer must not act
+  on in someone else's code. A model with less context could take it as an
+  instruction to edit.
+- The session had pushed once, to its own repository, from its starting
+  directory. Most reads ran from that directory with the repository stated,
+  so a gate on "pushed from this directory" would not have silenced them.
+  Ownership has to follow the repository.
+- One read was an issue thread, read through
+  `repos/<o>/<r>/issues/<N>/comments`, and R1 called it "PR #<N>".
+- Two reads were thread-state checks (`reviewThreads { isResolved }` with a
+  `-q` filter). Their output was formatted text, not JSON, so R1 took it for
+  review text.
+
+The reproduction keeps every R1. Its session pushed to the PR's repository
+(each of its 41 pushes printed a `To` line), and it opened the PRs it later
+read before reading them.
+
+Revision 22 therefore:
+- fires R1 only for a PR key that is own work (the definition under
+  "Observable behavior");
+- counts `issues/<N>/comments` only for a PR the session opened;
+- counts non-JSON output as review text only when the read has no filter,
+  or its filter names `body`.
+
+The R1 row of the trigger table owns these conditions. A read that is not
+own work consumes no stamp and no review round.
+
+State: the seam state gains `ownRepos` (`<o>/<r>`) and `ownPrs`
+(`<o>/<r>#<N>`). Both are learned at PostToolUse from push and
+`gh pr create` output. A revision 21 state without them loads as empty
+lists.
+
+Failure cases:
+- A picked-up PR read that states its repository, before the session's
+  first push to that repository, gets no R1 in that first round. R1 fires
+  from the next read after that push, and R2 is unaffected. A picked-up PR
+  read without a stated repository, from the session's directory (the
+  `seam-review` shape), still gets R1.
+- A review-only session started inside a repository, reading that
+  repository's PRs without stating it, still gets R1. So does a working
+  session reading someone else's PR in a repository it pushed to.
+- `git push -q`, and a push whose output the hook does not receive, teach no
+  repository. Own PRs from `gh pr create` output and reads without a stated
+  repository still count.
+- Remotes on hosts other than `github.com` are not parsed. A read that states
+  such a repository is never own work through a push, only through a
+  `gh pr create` URL on `github.com`.
+- Conversation comments (the issues API) of a PR opened in an earlier
+  session get no R1. Review comments and review bodies (the `pulls/` forms
+  and GraphQL) are unaffected.
+- A bot notice in an own PR's conversation (for example a usage-limit
+  comment), read with a filter that names `body`, still counts as review
+  text.
+
+Settling evidence for revision 22:
+- **Unit**, using the observed shapes with placeholder names:
+  - A session whose push output names `o/own` reads `o/other` through each
+    stated form: `gh api repos/o/other/pulls/N/reviews -q '.[].body'`, a
+    GraphQL `repository(owner:"o",name:"other")` query, and
+    `gh pr view N -R o/other --json comments`. None of these gives R1.
+  - `cd /elsewhere && gh pr view N --json comments -q '...body...'`, with no
+    push from `/elsewhere`, gives no R1.
+  - `repos/o/own/issues/N/comments` gives no R1 for an N the session did not
+    open, and R1 for one it opened.
+  - A `-q` thread-state filter gives no R1; a filter naming `body` gives R1.
+  - A `gh pr create` URL makes a later stated read of that PR, from another
+    directory, give R1.
+  - Each `To` line form teaches its repository, and a push without one
+    teaches none.
+  - A read without a stated repository from the hook `cwd`, before any push,
+    gives R1 (the `seam-review` shape).
+  - A revision 21 state loads.
+- **Incident replay.** Every step 6 and revision 21 assertion still holds.
+- **Claude transcript replay.** `scripts/replay-seam-redirect.mjs` gains
+  `--claude <transcript.jsonl>`. It feeds each Bash call and its result
+  through the Claude adapter, in order. Replaying the review-only session
+  above gives no R1. The transcript is private and stays local.
+- **Noise replay.** One file set of the 20 most recent rollouts, through the
+  revision 21 code and the revision 22 code. R2 and R3 fire on the same rows
+  in both runs, and no R1 is added. Every dropped R1 is listed for review
+  with its reason: repository not own, directory not own, issue thread, or a
+  filter without `body`.
+- **Live.** `seam-review`, `seam-round`, and `seam-push` on Codex still pass.
+  One headless Claude Code session in a scratch repository: a push, then a
+  stub-`gh` read stating another repository (no R1), then
+  `gh pr view 1 --comments` from the session directory (R1).
+- **Install.** Both targets reinstalled; both statuses pass.
+
 ## 6. Failure cases
 
 - Malformed rollout lines (control characters) are parsed leniently and
@@ -1169,7 +1281,10 @@ Settling evidence for revision 21:
     current-branch PRs in one epoch share that key, so the second gets no
     redirect.
   - A new session on an existing PR starts at epoch 0. R1 fires on its first
-    review read; R2 needs two pushes in that session.
+    review read only when the read is own work (revision 22): a read with no
+    stated repository from the session's directory is, while a read that
+    states the repository waits for the session's first push to it. R2
+    needs two pushes in that session.
   - A push the remote rejects still advances the epoch, which costs at most
     one extra redirect.
   - A review read run from a directory other than the repository's checkout
@@ -1230,3 +1345,6 @@ Settling evidence for revision 21:
    Then one PR: `seam.mjs`, its tests, the replay test, the `seam-round`
    scenario, and the eval results. Then both installs, the live checks, and
    both statuses.
+10. R1 on own work only (revision 22): this revision first, stop for review.
+    Then one PR: `seam.mjs`, its tests, the Claude transcript replay, and the
+    eval results. Then both installs, the live checks, and both statuses.
