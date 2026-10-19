@@ -366,8 +366,12 @@ test("a revision 20 state loads: its lastFired is dropped and does not quiet R2"
 
 test("R3 fires on a PR stacked on an own branch; not on a fix title, with or without an earlier merge", () => {
   const stacked = run([["pre", "git checkout -b feat-a && git push -u origin feat-a"], ["pre", "set -e\npython - <<'PY'\nprint('ledger')\nPY\ngh pr create --base feat-a --head feat-b --title 'Next step' --body-file b.md"]]);
-  assert.match(context(stacked[1]), /^\[seam-redirect\] This PR is stacked on this session's own work \(feat-a\)\. If it fixes a defect feat-a introduced/);
-  assert.match(context(stacked[1]), /If feat-a is not merged yet, move the fix onto feat-a and close this PR as superseded\./);
+  assert.deepEqual(context(stacked[1]).split("\n"), [
+    "[seam-redirect] This PR is stacked on this session's own work (feat-a). If it fixes a defect feat-a introduced, put the fix where the defect came from:",
+    "- If feat-a is not merged and still takes repair commits, move the fix onto feat-a and close this PR as superseded.",
+    "- If feat-a is frozen (the operator or oversight closed it to new commits), keep feat-a unchanged and keep this PR: one concern, with the introducing commit and its owning function named in the PR body.",
+    "- If it merged, fix the rule at its owner and name the introducing commit in the PR body."
+  ], "the three PR-time cases, line for line and in order (revision 24)");
   assert.deepEqual(kinds(stacked[1]), ["followup"]);
   const fix = run([["post", "gh pr merge 7 --squash"], ["pre", 'gh pr create --base main --title "Fix the date parser regression"']]);
   assert.equal(context(fix[1]), null, "a merge and a fix title do not tie the PR to merged work");
@@ -380,6 +384,11 @@ test("R3 fires on a PR stacked on an own branch; not on a fix title, with or wit
 test("R3 fires earliest at a branch started from own work, before any PR; not from main or a branch the session never created", () => {
   const early = run([["pre", "git checkout -b feat-a"], ["pre", "git checkout -b fix-a feat-a"]]);
   assert.equal(context(early[1]), branchText("fix-a", "feat-a"));
+  assert.deepEqual(context(early[1]).split("\n"), [
+    "[seam-redirect] fix-a starts from this session's own unmerged work (feat-a). If it fixes a defect feat-a introduced, put the fix where the defect came from:",
+    "- If feat-a still takes repair commits, commit the fix on feat-a instead of a new branch.",
+    "- If feat-a is frozen (the operator or oversight closed it to new commits), keep feat-a unchanged and make this branch its own one-concern PR stacked on it."
+  ], "the branch-time open and frozen cases, line for line (revision 24)");
   assert.deepEqual(kinds(early[1]), ["followup"]);
   assert.ok(context(run([["pre", "gh pr create --head feat-a --base main --title 'A'"], ["pre", "git switch -c fix-a feat-a"]]).at(-1)), "switch -c from a PR head");
   assert.ok(context(run([["pre", "git checkout -b feat-a"], ["pre", "git worktree add -b fix-a ../wt feat-a"]]).at(-1)), "worktree add -b with a start point");

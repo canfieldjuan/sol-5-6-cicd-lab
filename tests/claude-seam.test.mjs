@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { decideClaude, main, responseText } from "../hooks/codex-guards/claude-seam.mjs";
-import { pushText } from "../hooks/codex-guards/guards/seam.mjs";
+import { branchText, followupText, pushText } from "../hooks/codex-guards/guards/seam.mjs";
 import { rootDir } from "../scripts/lib.mjs";
 
 // Contract 5.4, revision 20: the seam redirect in Claude Code, through the
@@ -35,6 +35,15 @@ test("R2 fires on the second push to a branch, as PreToolUse context", () => {
   assert.equal(context(second), pushText(2, "`fix`"));
   assert.equal(second.output.hookSpecificOutput.permissionDecision, undefined, "context only: the push still runs");
   assert.deepEqual(second.log, [{ code: "seam-redirect", kind: "push" }]);
+});
+
+test("R3 through Claude Code: the same branch and PR texts as Codex (revision 24)", () => {
+  const branch = run([event("PreToolUse", "git checkout -b feat-a"), event("PreToolUse", "git checkout -b fix-a feat-a")]);
+  assert.equal(context(branch[1]), branchText("fix-a", "feat-a"));
+  assert.equal(branch[1].output.hookSpecificOutput.permissionDecision, undefined, "context only");
+  const stacked = run([event("PreToolUse", "git checkout -b feat-a && git push -u origin feat-a"), event("PreToolUse", "gh pr create --base feat-a --head feat-b --title 'Next step'")]);
+  assert.equal(context(stacked[1]), followupText("feat-a"));
+  assert.deepEqual(stacked[1].log, [{ code: "seam-redirect", kind: "followup" }]);
 });
 
 test("R1 reads review text from stdout; no R1 when stdout and stderr are empty", () => {

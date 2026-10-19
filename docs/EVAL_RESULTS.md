@@ -482,6 +482,37 @@ Unit: `npm run check` passes. The new tests cover:
 
 Mutation checks: breaking each of 11 rules fails at least one test.
 
+## Seam redirect: R3 and frozen bases (2026-10-19)
+
+Contract 5.4, revision 24 (PR #40). R3 told a Document Summarizer session to
+move a fix onto a base PR the operator had frozen, and to close the stacked
+fix PR. Revision 24 changes only R3's two texts. The results below check that
+nothing else moved.
+
+**Noise replay** (revision 22 code at `66b6b8b` vs revision 24 code, on one
+file set: the 20 most recent native Codex rollouts, 28,071 commands):
+
+| | R1 | R2 | R3 | All redirects |
+| --- | --- | --- | --- | --- |
+| Revision 22 | 197 | 199 | 24 | 420 |
+| Revision 24 | 197 | 199 | 24 | 420 |
+
+- Every redirect fires on the same row in both runs; apart from the text,
+  every field matches.
+- 22 entries change text, and all of them are R3. No R1 or R2 text changes.
+- The rollouts are private, so the rows are not published.
+
+**Tests:** `node --test` passes 245, fails 0, skips 2 (the private incident
+rollout and the private reviewer transcript).
+- The R3 branch and PR texts are asserted line for line.
+- A Claude Code test checks that the adapter prints the same R3 texts as
+  `seam.mjs`.
+
+**Incident replay:** with the private 2026-10-03 rollout, the timeline test
+fails at its first assertion (R3 at 01:03Z) on main at `66b6b8b` and on this
+branch alike. It is tracked in issue #41 and is not evidence for this
+revision, which leaves R3's trigger unchanged.
+
 ## Instruction retention: baseline reruns and ablation (2026-09-23)
 
 The 3 baseline cells invalidated by the usage limit were rerun on the same arm
