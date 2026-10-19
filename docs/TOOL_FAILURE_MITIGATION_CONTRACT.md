@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 22; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), revision 21 (PR #34: R2 at every re-push, as a check of what the push sends), and revision 22 (PR #36: R1 only on the session's own work). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 24 (revision 23 is still open in PR #38); section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), revision 21 (PR #34: R2 at every re-push, as a check of what the push sends), revision 22 (PR #36: R1 only on the session's own work), and revision 24 (PR #40: R3 keeps a stacked fix when its base is frozen; accepted 2026-10-19, implementation pending). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -1331,13 +1331,16 @@ Settling evidence:
 - **Noise replay.** One file set of the 20 most recent rollouts, through the
   revision 22 code and the revision 24 code. R1, R2 and R3 fire on the same
   rows; only R3's text differs.
-- **Live.** The existing stacked `gh pr create` R3 assertions still pass with
-  the new text.
+- **Incident replay.** Not evidence for this revision. No live scenario
+  covers R3. The private reproduction's R3 assertion (`SEAM_INCIDENT_ROLLOUT`)
+  checks when R3 fires, not its text, and it already fails on main at
+  `66b6b8b` (issue #41). The unit, parity and noise-replay checks above cover
+  the text.
 - **Install.** Both targets reinstalled; both statuses pass.
 
-This revision is independent of revision 23 (PR #38, still open). Neither
-changes the other's rules. Whichever merges second takes the next revision
-number.
+Revision 23 (PR #38, push subjects and deletes) is still open and
+independent. Revision 24 does not depend on it, and the number 23 stays
+reserved for it.
 
 ## 6. Failure cases
 
@@ -1423,3 +1426,6 @@ number.
 10. R1 on own work only (revision 22): this revision first, stop for review.
     Then one PR: `seam.mjs`, its tests, the Claude transcript replay, and the
     eval results. Then both installs, the live checks, and both statuses.
+11. R3 and frozen bases (revision 24): this revision first, stop for review.
+    Then one PR: `seam.mjs`, its tests, the Claude parity test, the noise
+    replay, and the eval results. Then both installs and both statuses.
