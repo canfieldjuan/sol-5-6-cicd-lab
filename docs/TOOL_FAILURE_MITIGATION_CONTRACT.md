@@ -1,6 +1,6 @@
 # Tool-Failure Mitigation Contract
 
-Status: ACCEPTED (PR #10), revision 22; section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), revision 21 (PR #34: R2 at every re-push, as a check of what the push sends), and revision 22 (PR #36: R1 only on the session's own work). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
+Status: ACCEPTED (PR #10), revision 24 (revision 23 is still open in PR #38); section 5.2 accepted (PR #13), amended in revisions 7-13; section 5.3 (step 4) accepted (PR #21), amended in revisions 15-18 (revision 18: the round guard leaves Stop); section 5.4 (step 6, seam redirect) accepted (PR #30) in revision 18, amended in revision 19 (push epochs per directory scope; ownership only from creating forms), revision 20 (the same redirects in Claude Code; the round-guard Stop hooks removed), revision 21 (PR #34: R2 at every re-push, as a check of what the push sends), revision 22 (PR #36: R1 only on the session's own work), and revision 24 (PR #40: R3 keeps a stacked fix when its base is frozen; accepted 2026-10-19, implementation pending). Implementation follows this contract. Steps 3-4 are specified at the invariant level only;
 their detailed specs are added as contract revisions after the step-2 probe
 has verified the hook behavior they depend on.
 
@@ -772,17 +772,22 @@ directory scope carried its review-round line (k >= 2):
 When that R1 line was sent, it already carried the escalation for the round,
 so R2 leaves it out. One redirect per round owns the escalation.
 
+R3's two texts are revision 24's (see "R3 and frozen bases (revision 24)").
+
 R3, at a branch started from own work (before any work exists):
 
 ```
-[seam-redirect] <new> starts from this session's own unmerged work (<own>). If it fixes a defect <own> introduced, commit the fix on <own> instead of a new branch, so the fix lands where the defect came from.
+[seam-redirect] <new> starts from this session's own unmerged work (<own>). If it fixes a defect <own> introduced, put the fix where the defect came from:
+- If <own> still takes repair commits, commit the fix on <own> instead of a new branch.
+- If <own> is frozen (the operator or oversight closed it to new commits), keep <own> unchanged and make this branch its own one-concern PR stacked on it.
 ```
 
 R3, at the PR (the call runs, so the PR exists when this arrives):
 
 ```
 [seam-redirect] This PR is stacked on this session's own work (<base>). If it fixes a defect <base> introduced, put the fix where the defect came from:
-- If <base> is not merged yet, move the fix onto <base> and close this PR as superseded.
+- If <base> is not merged and still takes repair commits, move the fix onto <base> and close this PR as superseded.
+- If <base> is frozen (the operator or oversight closed it to new commits), keep <base> unchanged and keep this PR: one concern, with the introducing commit and its owning function named in the PR body.
 - If it merged, fix the rule at its owner and name the introducing commit in the PR body.
 ```
 
@@ -1274,6 +1279,69 @@ Settling evidence for revision 22:
   `gh pr view 1 --comments` from the session directory (R1).
 - **Install.** Both targets reinstalled; both statuses pass.
 
+### R3 and frozen bases (revision 24)
+
+Observed on 2026-10-19, in the Document Summarizer Codex session
+(`ds-qualify-c9`). The operator froze PR #132 at its reviewed head under a new
+PR-size rule: "132 is getting larger and is becoming a cotext hog. We need to
+resolve that. each re read consumes the full context. Prs need to stay
+smaller". The operator then confirmed the freeze directly in that session's
+chat. The session opened the follow-up PR #141 with `--base` set to #132's
+branch, to repair a defect #132 had introduced. R3 fired. Because the base was
+not merged, it told the session to move the fix onto #132 and close #141 as
+superseded, which is the opposite of the operator's direction. The session did
+not follow the redirect and asked for the conflict to be resolved.
+
+The gap: R3's unmerged-base line assumes every unmerged base still takes
+commits. Under the PR-size rule, a frozen base takes none. Its defects are
+repaired in small PRs stacked on it, because each re-read of the base costs
+the whole PR.
+
+Revision 24 changes only R3's two texts (under "Observable behavior"). Its
+triggers, stamps, once-per keys and state are unchanged. Whether a base is
+frozen comes from operator or oversight direction, not from tool output, so
+the hook cannot tell (no I/O; SR4). The redirect states each case, and the
+agent applies the one that is true.
+
+"Put the fix where the defect came from" holds in every case. The fix changes
+the function that introduced the defect; only the PR that carries it differs.
+
+Invariants:
+- R1, R2 and R3 fire on exactly the same events as before this revision.
+- R3 never tells an agent to add commits to a frozen base, or to close a
+  stacked fix PR whose base is frozen.
+- Codex and Claude Code get identical R3 text from the one `seam.mjs`.
+- The texts keep the redirect principle: no question, and no merge, defer or
+  stop option.
+
+Failure cases:
+- An agent that takes a base that is still open for a frozen one stacks a fix
+  that could have gone on the base. The cost is one extra small PR, never a
+  lost fix, and the PR-size rule already prefers that.
+- An agent that was not told about a freeze treats the base as open and
+  follows the first line, as revision 22 would. The freeze has to be stated
+  to the session, by the operator or in an oversight note. The hook cannot
+  learn it.
+
+Settling evidence:
+- **Unit.** Both R3 texts, branch and PR, are asserted line for line, with
+  the three PR-time cases in this order.
+- **Parity.** The Codex and Claude adapters print the same R3 text for the
+  same command.
+- **Noise replay.** One file set of the 20 most recent rollouts, through the
+  revision 22 code and the revision 24 code. R1, R2 and R3 fire on the same
+  rows; only R3's text differs.
+- **Incident replay.** Not evidence for this revision. No live scenario
+  covers R3. The private reproduction's R3 assertion (`SEAM_INCIDENT_ROLLOUT`)
+  checks when R3 fires, not its text, and it already fails on main at
+  `66b6b8b` (issue #41). The unit, parity and noise-replay checks above cover
+  the text.
+- **Install.** Both targets reinstalled; both statuses pass.
+
+Revision 23 (PR #38, push subjects and deletes) is still open and
+independent. Revision 24 does not depend on it, and the number 23 stays
+reserved for it.
+
 ## 6. Failure cases
 
 - Malformed rollout lines (control characters) are parsed leniently and
@@ -1358,3 +1426,6 @@ Settling evidence for revision 22:
 10. R1 on own work only (revision 22): this revision first, stop for review.
     Then one PR: `seam.mjs`, its tests, the Claude transcript replay, and the
     eval results. Then both installs, the live checks, and both statuses.
+11. R3 and frozen bases (revision 24): this revision first, stop for review.
+    Then one PR: `seam.mjs`, its tests, the Claude parity test, the noise
+    replay, and the eval results. Then both installs and both statuses.
