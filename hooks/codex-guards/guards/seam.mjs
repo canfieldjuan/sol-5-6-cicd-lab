@@ -287,9 +287,15 @@ export function pushText(round, label, escalate = false) {
   return lines.join("\n");
 }
 
-// R3 at a branch started from own work: before any work exists.
+// R3 at a branch started from own work: before any work exists. Whether the
+// start is frozen comes from operator or oversight direction, not tool output
+// (no I/O), so the text states both cases (revision 24).
 export function branchText(name, start) {
-  return `[seam-redirect] ${name} starts from this session's own unmerged work (${start}). If it fixes a defect ${start} introduced, commit the fix on ${start} instead of a new branch, so the fix lands where the defect came from.`;
+  return [
+    `[seam-redirect] ${name} starts from this session's own unmerged work (${start}). If it fixes a defect ${start} introduced, put the fix where the defect came from:`,
+    `- If ${start} still takes repair commits, commit the fix on ${start} instead of a new branch.`,
+    `- If ${start} is frozen (the operator or oversight closed it to new commits), keep ${start} unchanged and make this branch its own one-concern PR stacked on it.`
+  ].join("\n");
 }
 
 // R3 at a PR stacked on own work: the create has run (Q10), so the text is
@@ -298,7 +304,8 @@ export function branchText(name, start) {
 export function followupText(base) {
   return [
     `[seam-redirect] This PR is stacked on this session's own work (${base}). If it fixes a defect ${base} introduced, put the fix where the defect came from:`,
-    `- If ${base} is not merged yet, move the fix onto ${base} and close this PR as superseded.`,
+    `- If ${base} is not merged and still takes repair commits, move the fix onto ${base} and close this PR as superseded.`,
+    `- If ${base} is frozen (the operator or oversight closed it to new commits), keep ${base} unchanged and keep this PR: one concern, with the introducing commit and its owning function named in the PR body.`,
     "- If it merged, fix the rule at its owner and name the introducing commit in the PR body."
   ].join("\n");
 }
